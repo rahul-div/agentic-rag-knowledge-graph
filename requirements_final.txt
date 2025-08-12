@@ -1,0 +1,291 @@
+# Final Requirements for Agentic RAG Knowledge Graph
+# Comprehensive dependencies for the entire project with Gemini API
+
+# ============================================================================
+# CORE AI AND GRAPHITI DEPENDENCIES
+# ============================================================================
+
+# Graphiti core with Google Gemini support
+graphiti-core[google-genai]==0.18.0
+
+# Pydantic AI framework
+pydantic-ai==0.3.2
+pydantic-ai-slim==0.3.2
+pydantic-graph==0.3.2
+
+# Google Gemini API
+google-genai>=1.16.1
+google-auth>=2.40.0
+
+# ============================================================================
+# DATABASE AND STORAGE
+# ============================================================================
+
+# Neo4j graph database
+neo4j>=5.28.0
+
+# PostgreSQL/Neon database
+asyncpg>=0.30.0
+psycopg2-binary>=2.9.9
+
+# ============================================================================
+# WEB FRAMEWORK AND API
+# ============================================================================
+
+# FastAPI and server components
+fastapi>=0.115.13
+uvicorn>=0.34.3
+starlette>=0.46.2
+python-multipart>=0.0.20
+
+# HTTP clients and networking
+httpx>=0.28.1
+httpx-sse>=0.4.0
+aiohttp>=3.12.13
+websockets>=15.0.1
+
+# Server-sent events
+sse-starlette>=2.3.6
+
+# CORS and middleware
+# (included with FastAPI)
+
+# ============================================================================
+# CORE PYTHON DEPENDENCIES
+# ============================================================================
+
+# Pydantic and validation
+pydantic>=2.11.7
+pydantic-core>=2.33.2
+pydantic-settings>=2.10.0
+
+# Environment and configuration
+python-dotenv>=1.1.0
+
+# Type extensions
+typing-extensions>=4.14.0
+typing-inspection>=0.4.1
+
+# ============================================================================
+# DATA PROCESSING AND UTILITIES
+# ============================================================================
+
+# Numerical and data processing
+numpy>=2.3.1
+
+# Text and markdown processing
+markdown-it-py>=3.0.0
+mdurl>=0.1.2
+
+# YAML processing
+PyYAML>=6.0.2
+
+# Caching
+diskcache>=5.6.3
+
+# ============================================================================
+# ASYNC AND CONCURRENCY
+# ============================================================================
+
+# Async utilities
+anyio>=4.9.0
+asyncio
+tenacity>=9.0.0
+
+# ============================================================================
+# CLI AND USER INTERFACE
+# ============================================================================
+
+# Rich text formatting
+rich>=14.0.0
+Pygments>=2.19.2
+
+# CLI utilities
+click>=8.2.1
+colorama>=0.4.6
+prompt_toolkit>=3.0.51
+wcwidth>=0.2.13
+
+# Progress bars
+tqdm>=4.67.1
+
+# ============================================================================
+# DEVELOPMENT AND TESTING
+# ============================================================================
+
+# Testing framework
+pytest>=8.4.1
+pytest-asyncio>=1.0.0
+
+# ============================================================================
+# UTILITY AND SUPPORT LIBRARIES
+# ============================================================================
+
+# HTTP and URL utilities
+requests>=2.32.4
+urllib3>=2.5.0
+certifi>=2025.6.15
+charset-normalizer>=3.4.2
+idna>=3.10
+
+# Date and time
+python-dateutil>=2.9.0
+pytz>=2025.2
+
+# UUID utilities
+uuid>=1.30
+
+# File handling
+filelock>=3.18.0
+fsspec>=2025.5.1
+
+# JSON and data formats
+jiter>=0.10.0
+
+# Packaging utilities
+packaging>=25.0
+six>=1.17.0
+zipp>=3.23.0
+
+# ============================================================================
+# ASYNC HTTP DEPENDENCIES
+# ============================================================================
+
+# Async HTTP client dependencies
+aiohappyeyeballs>=2.6.1
+aiosignal>=1.3.2
+attrs>=25.3.0
+frozenlist>=1.7.0
+multidict>=6.5.0
+propcache>=0.3.2
+yarl>=1.20.1
+sniffio>=1.3.1
+h11>=0.16.0
+httpcore>=1.0.9
+
+# ============================================================================
+# METADATA AND COMPATIBILITY
+# ============================================================================
+
+# Import metadata
+importlib_metadata>=8.7.0
+
+# Evaluation and type checking
+eval_type_backport>=0.2.2
+annotated-types>=0.7.0
+
+# Configuration and argument parsing
+argcomplete>=3.6.2
+iniconfig>=2.1.0
+pluggy>=1.6.0
+
+# ============================================================================
+# OPTIONAL: ADDITIONAL AI PROVIDERS (if needed later)
+# ============================================================================
+
+# OpenAI (commented out since using Gemini only)
+# openai>=1.90.0
+
+# Anthropic (commented out since using Gemini only)
+# anthropic>=0.54.0
+
+# MCP (Model Context Protocol) support
+mcp>=1.9.4
+
+# ============================================================================
+# CLOUD AND ENTERPRISE (optional)
+# ============================================================================
+
+# AWS SDK (if using AWS services)
+# boto3>=1.38.41
+# botocore>=1.38.41
+# s3transfer>=0.13.0
+
+# Hugging Face (if using HF models)
+# huggingface-hub>=0.33.0
+# tokenizers>=0.21.1
+
+# ============================================================================
+# OBSERVABILITY (optional)
+# ============================================================================
+
+# Telemetry and monitoring
+opentelemetry-api>=1.34.1
+logfire-api>=3.21.1
+
+# ============================================================================
+# SPECIALIZED DEPENDENCIES
+# ============================================================================
+
+# Caching and performance
+cachetools>=5.5.2
+
+# Data formats
+fastavro>=1.11.1
+
+# Cryptography
+rsa>=4.9.1
+pyasn1>=0.6.1
+pyasn1-modules>=0.4.2
+
+# Development utilities
+distro>=1.9.0
+griffe>=1.7.3
+
+# Type extensions for requests
+types-requests>=2.32.4.20250611
+
+# Fast sequence alignment (specialized)
+fasta2a>=0.3.2
+
+# JMESPath for JSON querying
+jmespath>=1.0.1
+
+# ============================================================================
+# NOTES:
+# ============================================================================
+# 
+# This requirements.txt includes:
+# 1. All core dependencies for Graphiti with Gemini
+# 2. Database drivers for Neo4j and PostgreSQL/Neon
+# 3. FastAPI and web server components
+# 4. Testing and development tools
+# 5. CLI and rich text formatting
+# 6. All async and HTTP dependencies
+# 7. Utility libraries used throughout the project
+#
+# ============================================================================
+# ONYX INTEGRATION DEPENDENCIES
+# ============================================================================
+
+# Onyx client library (your custom integration package)
+divami-tools>=1.0.0
+
+# Enhanced async and HTTP support for external API integration
+aiofiles>=24.1.0
+backoff>=2.2.1
+circuitbreaker>=2.0.0
+
+# Advanced configuration management
+dynaconf>=3.2.0
+python-decouple>=3.8
+
+# Enhanced monitoring and observability
+structlog>=23.2.0
+prometheus-client>=0.20.0
+
+# Data validation and serialization for API integration
+marshmallow>=3.22.0
+marshmallow-dataclass>=8.7.0
+
+# ============================================================================
+# NOTES:
+# ============================================================================
+# 
+# Optional sections are commented out but can be uncommented if needed:
+# - Additional AI providers (OpenAI, Anthropic)
+# - AWS SDK for cloud storage
+# - Hugging Face for additional models
+#
+# The versions are pinned to ensure compatibility while allowing
+# minor updates for security patches.

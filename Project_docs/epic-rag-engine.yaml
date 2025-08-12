@@ -1,0 +1,177 @@
+---
+epic_id: "epic-rag-engine"
+epic_name: "RAG Engine & Query Processing"
+epic_description: "Develop the core Retrieval-Augmented Generation engine that processes natural language queries, retrieves relevant NIFTY data, and generates accurate, beginner-friendly financial responses"
+
+# Business Context
+business_value: "Transforms raw NIFTY data into accessible insights through AI-powered natural language processing, enabling financial beginners to understand complex market data"
+target_users: ["Financial beginners", "Investment learners", "Anyone seeking NIFTY market insights"]
+business_priority: "Critical - Core AI functionality driving the entire chatbot experience"
+success_metrics:
+  - "Query response accuracy >90% for historical NIFTY data"
+  - "Response generation time <5 seconds per query"
+  - "Responses appropriate for financial beginner comprehension level"
+  - "Successfully handles 20+ common financial query patterns"
+
+# Technical Context
+module_scope: "RAG Engine Module"
+architecture_alignment: "Local LLM with SentenceTransformers embeddings, Chroma DB vector search, privacy-first offline operation"
+technology_stack:
+  embeddings: "SentenceTransformers (all-MiniLM-L6-v2 or similar)"
+  vector_db: "Chroma DB for local vector storage"
+  llm: "Local LLM (TBD - per technical specification)"
+  retrieval: "Semantic similarity search with metadata filtering"
+  processing: "Python with transformers, langchain/llamaindex"
+
+# Dependencies & Integration
+dependencies:
+  internal:
+    - "epic-infrastructure-foundation: Configuration, logging, environment setup"
+    - "epic-document-processing: Processed and validated NIFTY data"
+    - "epic-data-storage: Chroma DB setup and data persistence"
+  external:
+    - "SentenceTransformers library"
+    - "Chroma DB vector database"
+    - "Local LLM runtime (TBD per technical specification)"
+    - "Python transformers library"
+  
+integration_points:
+  - "Data retrieval from Chroma DB via Data Storage module"
+  - "Query processing APIs for Web Interface module"
+  - "Document embeddings pipeline from Document Processing"
+  - "Configuration management from Infrastructure Foundation"
+
+# Delivery Strategy
+timeline: "Sprint 3-4 (after Document Processing and Data Storage)"
+delivery_approach: "Iterative development with query accuracy validation at each step"
+testing_strategy:
+  - "Unit tests for embedding generation and vector operations"
+  - "Integration tests for RAG pipeline (retrieval + generation)"
+  - "Performance tests for query response times"
+  - "Accuracy tests using predefined NIFTY query-answer pairs"
+  - "Load testing for concurrent query processing"
+  - "Edge case testing for malformed or complex queries"
+
+# Risk Assessment & Mitigation
+risks:
+  technical:
+    - risk: "Local LLM performance insufficient for quality responses"
+      probability: "Medium"
+      impact: "High"
+      mitigation: "Model selection criteria per technical spec; fallback responses; accuracy validation framework"
+    - risk: "Vector search accuracy below expectations"
+      probability: "Low"
+      impact: "High"
+      mitigation: "Test multiple embedding models; implement hybrid search with metadata; fine-tune similarity thresholds"
+    - risk: "Memory usage exceeds system limits (>4GB RAM)"
+      probability: "Medium"
+      impact: "Medium"
+      mitigation: "Implement model quantization; chunk processing; memory monitoring and cleanup"
+  delivery:
+    - risk: "Response quality not suitable for financial beginners"
+      probability: "Medium"
+      impact: "High"
+      mitigation: "Extensive prompt engineering; response post-processing; user feedback integration"
+
+rollback_strategy:
+  - "Model versioning for LLM and embedding models"
+  - "Feature flags for new RAG components"
+  - "Fallback to simpler keyword-based search"
+  - "Previous vector index backups in Chroma DB"
+
+# Stories & Acceptance Criteria
+
+stories:
+  - story_id: "RAG-001"
+    title: "Document Embedding Pipeline"
+    description: "Convert processed NIFTY documents into vector embeddings for semantic search"
+    acceptance_criteria:
+      - "Generate embeddings for CSV, PDF, TXT content using SentenceTransformers"
+      - "Store embeddings in Chroma DB with metadata (date, document type, content chunk)"
+      - "Handle chunking strategy for large documents (max 512 tokens per chunk)"
+      - "Batch processing for multiple documents"
+      - "Progress tracking and error handling for embedding failures"
+    business_value: "Enables semantic search across NIFTY historical data"
+    effort_estimate: "10 story points"
+    dependencies: ["epic-document-processing validated data", "epic-data-storage Chroma DB setup"]
+
+  - story_id: "RAG-002"
+    title: "Semantic Query Processing"
+    description: "Process natural language queries and retrieve relevant NIFTY data chunks"
+    acceptance_criteria:
+      - "Accept natural language queries in English"
+      - "Generate query embeddings using same model as documents"
+      - "Perform similarity search in Chroma DB (top-k results)"
+      - "Filter results by metadata (date ranges, document types)"
+      - "Return ranked results with relevance scores"
+    business_value: "Finds most relevant historical data for user questions"
+    effort_estimate: "8 story points"
+    dependencies: ["RAG-001 document embeddings"]
+
+  - story_id: "RAG-003"
+    title: "Local LLM Integration"
+    description: "Integrate local language model for generating beginner-friendly responses"
+    acceptance_criteria:
+      - "Setup and configure local LLM (TBD per technical specification)"
+      - "Implement prompt templates for financial explanations"
+      - "Generate responses using retrieved NIFTY data as context"
+      - "Format responses for financial beginner comprehension"
+      - "Handle model loading, inference, and memory management"
+    business_value: "Generates human-readable explanations from raw NIFTY data"
+    effort_estimate: "12 story points"
+    dependencies: ["RAG-002 semantic retrieval"]
+
+  - story_id: "RAG-004"
+    title: "Response Quality & Accuracy"
+    description: "Ensure responses are accurate, relevant, and appropriate for target users"
+    acceptance_criteria:
+      - "Implement response validation against known NIFTY facts"
+      - "Add confidence scoring for generated responses"
+      - "Filter out hallucinated or irrelevant information"
+      - "Format responses with proper financial terminology explanations"
+      - "Include data sources and timestamps in responses"
+    business_value: "Builds user trust through accurate and transparent responses"
+    effort_estimate: "6 story points"
+    dependencies: ["RAG-003 LLM integration"]
+
+  - story_id: "RAG-005"
+    title: "Query Processing API"
+    description: "RESTful API for web interface to submit queries and receive responses"
+    acceptance_criteria:
+      - "POST /query endpoint accepting natural language queries"
+      - "JSON response format with answer, sources, confidence"
+      - "WebSocket support for real-time response streaming"
+      - "Query logging and performance metrics"
+      - "Error handling for invalid queries or system failures"
+    business_value: "Enables web interface to access RAG capabilities"
+    effort_estimate: "7 story points"
+    dependencies: ["RAG-004 response quality", "epic-web-interface API requirements"]
+
+# Definition of Done
+definition_of_done:
+  technical:
+    - "All RAG components have unit tests with >85% coverage"
+    - "Integration tests validate end-to-end query processing"
+    - "Performance benchmarks meet <5s response time requirement"
+    - "Memory usage stays within 4GB RAM limit during operation"
+    - "Error handling implemented for all failure scenarios"
+    - "API documentation complete with example queries/responses"
+  business:
+    - "20+ test queries answered accurately (>90% accuracy rate)"
+    - "Responses validated by financial domain expert"
+    - "User testing confirms beginner-friendly language"
+    - "System handles concurrent queries without degradation"
+
+# Notes & Considerations
+notes:
+  - "Consider implementing query intent classification for better response routing"
+  - "May need response caching for frequently asked questions"
+  - "Future iterations could include query suggestion/auto-completion"
+  - "Monitor for potential bias in financial advice and implement guardrails"
+  - "Consider implementing explanation chains for complex financial concepts"
+
+related_documentation:
+  - "docs/business-requirements.md: Query processing and response requirements"
+  - "docs/technical-architecture-overview.md: RAG Engine Module specifications"
+  - "docs/happy-flow.md: Query processing user flows"
+  - "docs/vision.md: AI-powered insights and user experience goals"

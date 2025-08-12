@@ -1,0 +1,77 @@
+"""
+Onyx Cloud Enterprise Configuration Guide
+
+IMPORTANT: You need to configure your Onyx Cloud Enterprise API credentials
+before the integration tests will work.
+
+STEP 1: Get your Onyx Cloud Enterprise API credentials
+========================================================
+
+1. Log into your Onyx Cloud Enterprise dashboard
+2. Navigate to API Settings or Developer Settings
+3. Generate or copy your API key
+4. Note your Onyx Cloud base URL (e.g., https://your-company.onyx.app)
+
+STEP 2: Configure environment variables
+========================================
+
+Add the following to your .env file:
+
+# Onyx Cloud Enterprise Configuration
+ONYX_API_KEY=your_api_key_here
+ONYX_BASE_URL=https://your-company.onyx.app
+ONYX_TIMEOUT=30
+
+EXAMPLE .env entries:
+====================
+
+# Replace with your actual values
+ONYX_API_KEY=dn_qODmg9r8Nl9PR4R9GF_z1UA0smcwVIcj58Ei0zWA  # Your actual API key
+ONYX_BASE_URL=https://acme-corp.onyx.app                      # Your company's Onyx URL
+ONYX_TIMEOUT=30
+
+STEP 3: Test the configuration
+===============================
+
+After setting up your .env file, run:
+
+    python diagnose_onyx_api.py
+
+This will test your API connectivity and help identify any remaining issues.
+
+STEP 4: Run the integration test
+=================================
+
+Once the diagnostic passes, run:
+
+    python test_onyx_integration.py
+
+This will perform a safe test ingestion with a clearly marked test document.
+
+TROUBLESHOOTING
+===============
+
+Common issues:
+
+1. "ONYX_API_KEY environment variable is required"
+   → Add ONYX_API_KEY to your .env file
+
+2. "Authentication failed"
+   → Check your API key is correct and active
+
+3. "Connection failed"
+   → Check your ONYX_BASE_URL is correct
+
+4. "Invalid JSON response"
+   → This indicates a server-side issue or wrong endpoint URL
+
+SAFETY REMINDERS
+================
+
+- All test documents are clearly marked as safe to delete
+- Test documents contain only harmless test content
+- No production data is ever used in tests
+- Test documents can be easily identified and removed from Onyx UI
+
+For more help, check the diagnostic output or contact your Onyx administrator.
+"""
