@@ -1,8 +1,8 @@
-# Multi-Client Project Intelligence System - Planning Document
+# Onyx + Graphiti Hybrid Architecture - Planning Document
 
 ## Current Architecture Analysis
 
-### 🏗️ **Current System (Project-Centric Graphiti RAG)**
+### 🏗️ **Current System (Graphiti-Only RAG)**
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -57,7 +57,7 @@
 
 ---
 
-### 🚀 **Target Architecture (Multi-Client Project Intelligence Platform)**
+### 🚀 **Target Architecture (Onyx + Graphiti Hybrid)**
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -90,27 +90,27 @@
 │  ┌─────────────────┐          ┌────────────────────┐      │
 │  │   ONYX CLOUD    │          │    GRAPHITI LOCAL  │      │
 │  │ ┌─────────────┐ │          │  ┌───────────────┐ │      │
-│  │ │ Multi-Client│ │          │  │ Neo4j +       │ │      │
-│  │ │ Vector DB   │ │          │  │ Project       │ │      │
-│  │ │ (Isolated)  │ │          │  │ Knowledge     │ │      │
+│  │ │ Enterprise  │ │          │  │ Neo4j +       │ │      │
+│  │ │ Vector DB   │ │          │  │ Temporal      │ │      │
+│  │ │ (Scalable)  │ │          │  │ Knowledge     │ │      │
 │  │ └─────────────┘ │          │  │ Graph         │ │      │
 │  │ ┌─────────────┐ │          │  └───────────────┘ │      │
-│  │ │ Enterprise  │ │          │  ┌───────────────┐ │      │
-│  │ │ Search APIs │ │          │  │ Stakeholder   │ │      │
-│  │ └─────────────┘ │          │  │ Requirements  │ │      │
+│  │ │ 40+ Connec- │ │          │  ┌───────────────┐ │      │
+│  │ │ tors & APIs │ │          │  │ Entity        │ │      │
+│  │ └─────────────┘ │          │  │ Relationships │ │      │
 │  └─────────────────┘          │  └───────────────┘ │      │
 ├─────────────────────────────────────────────────────────────┤
 │                 Dual Ingestion Pipeline                     │
 │  ┌─────────────────┐                                       │
 │  │   UNIFIED       │   ┌──── Onyx Cloud API ──────────┐   │
-│  │   DOCUMENT      │──►│ • Project Document Sectioning │   │
-│  │   PROCESSOR     │   │ • Client Metadata Mapping    │   │
-│  │                 │   │ • Multi-Tenant Ingestion     │   │
+│  │   DOCUMENT      │──►│ • Document Sectioning        │   │
+│  │   PROCESSOR     │   │ • Metadata Mapping           │   │
+│  │                 │   │ • Enterprise Ingestion       │   │
 │  │   (Semantic     │   └─────────────────────────────┘   │
 │  │    Chunking)    │   ┌──── Graphiti Local ───────────┐  │
-│  │                 │──►│ • Project Entity Extraction  │   │
-│  │                 │   │ • Stakeholder Mapping        │   │
-│  │                 │   │ • Decision Timeline Building │   │
+│  │                 │──►│ • Entity Extraction          │   │
+│  │                 │   │ • Relationship Mapping       │   │
+│  │                 │   │ • Temporal Graph Building    │   │
 │  └─────────────────┘   └─────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -119,15 +119,15 @@
 
 ## Architecture Migration Plan
 
-### **Phase 1: Current → Multi-Client Hybrid (Weeks 1-7)**
+### **Phase 1: Current → Cloud Hybrid (Weeks 1-5)**
 
 **What Changes:**
-- ✅ **Keep:** All existing Graphiti functionality with project-centric focus
-- ✅ **Keep:** PostgreSQL vector database (as backup/metadata store)
-- ✅ **Keep:** Neo4j + Graphiti knowledge graph for project relationships
-- 🆕 **Add:** Onyx Cloud integration for enterprise search capabilities
-- 🆕 **Add:** Dual ingestion pipeline for project documents
-- 🆕 **Add:** Intelligent tool routing for project-specific queries
+- ✅ **Keep:** All existing Graphiti functionality
+- ✅ **Keep:** PostgreSQL vector database (as backup)
+- ✅ **Keep:** Neo4j + Graphiti knowledge graph
+- 🆕 **Add:** Onyx Cloud integration via API
+- 🆕 **Add:** Dual ingestion pipeline
+- 🆕 **Add:** Intelligent tool routing in agent
 
 **What Stays The Same:**
 - Gemini 2.0 as primary LLM
@@ -135,7 +135,7 @@
 - Pydantic AI agent framework
 - Environment-based configuration
 - PostgreSQL for session/metadata storage
-- Neo4j for project knowledge graph storage
+- Neo4j for knowledge graph storage
 
 ### **Phase 2: Cloud → Community Migration (Week 6+)**
 
@@ -214,18 +214,18 @@
 ```python
 # Current System Prompt Strategy
 CURRENT_ROUTING = """
-- Use vector_search for semantic similarity across project documents
-- Use graph_search for project entity relationships  
-- Use hybrid_search for complex project queries
+- Use vector_search for semantic similarity
+- Use graph_search for entity relationships  
+- Use hybrid_search for complex queries
 """
 
 # Enhanced System Prompt Strategy  
-PROJECT_ROUTING = """
-- Use onyx_search for project document discovery and factual questions
-- Use onyx_answer_with_quote for comprehensive answers with project citations
-- Use graph_search for stakeholder relationships and requirement dependencies
-- Use get_entity_timeline for project decision history and evolution
-- Use comprehensive_search for complex project analysis requiring multiple perspectives
+HYBRID_ROUTING = """
+- Use onyx_search for document discovery and factual questions
+- Use onyx_answer_with_quote for comprehensive answers with citations
+- Use graph_search for entity relationships and network analysis
+- Use get_entity_timeline for temporal/historical questions
+- Use comprehensive_search for complex research requiring multiple perspectives
 """
 ```
 
@@ -233,24 +233,24 @@ PROJECT_ROUTING = """
 
 ```python
 # Current Ingestion Flow
-Project Document → Semantic Chunking → Gemini Embeddings → PostgreSQL
-                ↘ Entity Extraction → Graphiti → Neo4j
+Document → Semantic Chunking → Gemini Embeddings → PostgreSQL
+       ↘ Entity Extraction → Graphiti → Neo4j
 
 # Enhanced Dual Ingestion Flow
-Project Document → Semantic Chunking → ┌─ Onyx Cloud API → Multi-Client Vector Store
-                                     └─ Project Entity Pipeline → Neo4j Knowledge Graph
-                                     └─ Metadata Store → PostgreSQL
+Document → Semantic Chunking → ┌─ Onyx Cloud API → Onyx Vector Store
+                              └─ Graphiti Pipeline → Neo4j Knowledge Graph
+                              └─ Backup Vector Store → PostgreSQL (optional)
 ```
 
 ### **Search Strategy Matrix**
 
 | Query Type | Current System | Enhanced System | Rationale |
 |------------|---------------|-----------------|-----------|
-| Project Questions | vector_search | onyx_answer_with_quote | Enterprise QA with project citations |
-| Document Discovery | vector_search | onyx_search | Scalable project document search |
-| Stakeholder Queries | graph_search | graph_search (unchanged) | Graphiti excels at relationships |
-| Decision History | get_entity_timeline | get_entity_timeline | Graphiti's temporal strength |
-| Complex Analysis | hybrid_search | comprehensive_search | Multi-system project intelligence |
+| Factual Questions | vector_search | onyx_answer_with_quote | Enterprise QA with citations |
+| Document Discovery | vector_search | onyx_search | Scalable semantic search |
+| Relationship Queries | graph_search | graph_search (unchanged) | Graphiti excels at this |
+| Temporal Analysis | get_entity_timeline | get_entity_timeline | Graphiti's unique strength |
+| Complex Research | hybrid_search | comprehensive_search | Multi-system intelligence |
 
 ---
 

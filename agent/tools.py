@@ -16,12 +16,31 @@ from .db_utils import (
     get_document,
     list_documents,
     get_document_chunks,
-)
+)# Your dual entity extraction strategy
+# 1. Regex extraction (structured data)
+entities = {
+    "clients": ["TechCorp Inc"],
+    "projects": ["MOBILE-APP-123"], 
+    "team_members": ["John Smith"],
+    "technologies": ["React Native", "PostgreSQL"]
+}
+
+# 2. Flattened for Graphiti context
+flattened_metadata = {
+    "entities_clients": "TechCorp Inc",
+    "entities_projects": "MOBILE-APP-123",
+    "entities_team_members": "John Smith",
+    "entities_technologies": "React Native, PostgreSQL"
+}
+
+# 3. Graphiti's LLM enhancement
+# Creates rich semantic understanding:
+# - John Smith WORKS_ON MOBILE-APP-123 (relationship)
+# - MOBILE-APP-123 HAS_CLIENT TechCorp Inc (business relationship)
+# - MOBILE-APP-123 USES_TECHNOLOGY React Native (technical relationship)
+# - All with temporal validity and confidence scores
 from .graph_utils import search_knowledge_graph, get_entity_relationships, graph_client
 from .models import ChunkResult, GraphSearchResult, DocumentMetadata
-
-# Import Onyx service
-from onyx.service import OnyxService
 
 # Load environment variables
 load_dotenv()
@@ -101,22 +120,6 @@ class EntityTimelineInput(BaseModel):
     entity_name: str = Field(..., description="Name of the entity")
     start_date: Optional[str] = Field(None, description="Start date (ISO format)")
     end_date: Optional[str] = Field(None, description="End date (ISO format)")
-
-
-class OnyxSearchInput(BaseModel):
-    """Input for Onyx document search tool."""
-
-    query: str = Field(..., description="Search query for finding relevant documents")
-    num_results: int = Field(default=5, description="Maximum number of documents to return (1-10)")
-    search_type: str = Field(default="hybrid", description="Search type: 'hybrid', 'semantic', or 'keyword'")
-
-
-class OnyxAnswerInput(BaseModel):
-    """Input for Onyx answer with quote tool."""
-
-    query: str = Field(..., description="Question to answer using Onyx knowledge base")
-    num_docs: int = Field(default=3, description="Number of source documents to use (1-10)")
-    include_quotes: bool = Field(default=True, description="Whether to include supporting quotes")
 
 
 # Tool Implementation Functions
@@ -345,137 +348,6 @@ async def get_entity_timeline_tool(
     except Exception as e:
         logger.error(f"Entity timeline query failed: {e}")
         return []
-
-
-async def onyx_search_tool(input_data: OnyxSearchInput) -> Dict[str, Any]:
-    """
-    Perform document search using Onyx Cloud API.
-
-    Args:
-        input_data: Search parameters
-
-    Returns:
-        Search results with documents and metadata
-    """
-    try:
-        logger.info(f"Performing Onyx search: {input_data.query}")
-        
-        # Initialize Onyx service
-        onyx_service = OnyxService()
-        
-        # Perform search
-        search_results = onyx_service.search_documents(
-            query=input_data.query,
-            num_results=input_data.num_results,
-            search_type=input_data.search_type
-        )
-        
-        # Format results for agent consumption
-        formatted_results = {
-            "query": input_data.query,
-            "search_type": input_data.search_type,
-            "total_documents": len(search_results.get("top_documents", [])),
-            "documents": []
-        }
-        
-        # Process each document
-        for doc in search_results.get("top_documents", []):
-            formatted_doc = {
-                "document_id": doc.get("semantic_identifier", "Unknown"),
-                "title": doc.get("semantic_identifier", "Unknown"),
-                "content_preview": doc.get("blurb", "")[:200] + "..." if doc.get("blurb") else "",
-                "relevance_score": doc.get("score", 0.0),
-                "source_type": doc.get("source_type", "unknown"),
-                "link": doc.get("link", ""),
-                "updated_at": doc.get("updated_at", "")
-            }
-            formatted_results["documents"].append(formatted_doc)
-        
-        logger.info(f"Onyx search completed: {formatted_results['total_documents']} documents found")
-        return formatted_results
-
-    except Exception as e:
-        logger.error(f"Onyx search failed: {e}")
-        return {
-            "query": input_data.query,
-            "search_type": input_data.search_type,
-            "total_documents": 0,
-            "documents": [],
-            "error": str(e)
-        }
-
-
-async def onyx_answer_with_quote_tool(input_data: OnyxAnswerInput) -> Dict[str, Any]:
-    """
-    Get comprehensive answer with citations using Onyx Cloud API.
-
-    Args:
-        input_data: Answer query parameters
-
-    Returns:
-        Answer with supporting quotes and source documents
-    """
-    try:
-        logger.info(f"Getting Onyx answer for: {input_data.query}")
-        
-        # Initialize Onyx service
-        onyx_service = OnyxService()
-        
-        # Get answer with quotes
-        answer_results = onyx_service.answer_with_quote(
-            query=input_data.query,
-            num_docs=input_data.num_docs,
-            include_quotes=input_data.include_quotes
-        )
-        
-        # Format results for agent consumption
-        formatted_results = {
-            "query": input_data.query,
-            "answer": answer_results.get("answer", ""),
-            "answer_citationless": answer_results.get("answer_citationless", ""),
-            "total_quotes": len(answer_results.get("quotes", [])),
-            "total_documents": len(answer_results.get("top_documents", [])),
-            "quotes": [],
-            "source_documents": []
-        }
-        
-        # Process quotes
-        for quote in answer_results.get("quotes", []):
-            formatted_quote = {
-                "text": quote.get("text", ""),
-                "source": quote.get("semantic_identifier", "Unknown"),
-                "document_id": quote.get("document_id", ""),
-                "relevance_score": quote.get("score", 0.0)
-            }
-            formatted_results["quotes"].append(formatted_quote)
-        
-        # Process source documents
-        for doc in answer_results.get("top_documents", []):
-            formatted_doc = {
-                "document_id": doc.get("semantic_identifier", "Unknown"),
-                "title": doc.get("semantic_identifier", "Unknown"),
-                "content_preview": doc.get("blurb", "")[:150] + "..." if doc.get("blurb") else "",
-                "relevance_score": doc.get("score", 0.0),
-                "source_type": doc.get("source_type", "unknown"),
-                "link": doc.get("link", "")
-            }
-            formatted_results["source_documents"].append(formatted_doc)
-        
-        logger.info(f"Onyx answer completed: {len(formatted_results['answer'])} chars, {formatted_results['total_quotes']} quotes")
-        return formatted_results
-
-    except Exception as e:
-        logger.error(f"Onyx answer with quote failed: {e}")
-        return {
-            "query": input_data.query,
-            "answer": f"I apologize, but I encountered an error while searching for information: {str(e)}",
-            "answer_citationless": "",
-            "total_quotes": 0,
-            "total_documents": 0,
-            "quotes": [],
-            "source_documents": [],
-            "error": str(e)
-        }
 
 
 # Combined search function for agent use
