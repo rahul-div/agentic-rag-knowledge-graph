@@ -22,6 +22,7 @@ from .tools import (
     get_entity_timeline_tool,
     onyx_search_tool,
     onyx_answer_with_quote_tool,
+    comprehensive_search_tool,
     VectorSearchInput,
     GraphSearchInput,
     HybridSearchInput,
@@ -30,7 +31,8 @@ from .tools import (
     EntityRelationshipInput,
     EntityTimelineInput,
     OnyxSearchInput,
-    OnyxAnswerInput
+    OnyxAnswerInput,
+    ComprehensiveSearchInput
 )
 
 # Load environment variables
@@ -374,3 +376,44 @@ async def onyx_answer_with_quote(
     )
     
     return await onyx_answer_with_quote_tool(input_data)
+
+
+@rag_agent.tool
+async def comprehensive_search(
+    ctx: RunContext[AgentDependencies],
+    query: str,
+    num_results: int = 5,
+    include_onyx: bool = True,
+    include_vector: bool = True,
+    include_graph: bool = True,
+    search_type: str = "hybrid"
+) -> Dict[str, Any]:
+    """
+    Perform comprehensive search across all available systems (Onyx, Vector, Knowledge Graph).
+    
+    This tool searches multiple systems simultaneously and combines results for
+    the most comprehensive information retrieval. Use when you need to find
+    information from all available sources or when a single search type might
+    not provide complete coverage.
+    
+    Args:
+        query: Search query to execute across all systems
+        num_results: Number of results per search type (1-10, default: 5)
+        include_onyx: Include Onyx cloud search (default: True)
+        include_vector: Include vector similarity search (default: True)
+        include_graph: Include knowledge graph search (default: True)
+        search_type: Search type for compatible systems - 'hybrid', 'semantic', 'keyword'
+    
+    Returns:
+        Combined results from all enabled search systems with unified summary
+    """
+    input_data = ComprehensiveSearchInput(
+        query=query,
+        num_results=min(max(num_results, 1), 10),  # Ensure valid range
+        include_onyx=include_onyx,
+        include_vector=include_vector,
+        include_graph=include_graph,
+        search_type=search_type
+    )
+    
+    return await comprehensive_search_tool(input_data)

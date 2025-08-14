@@ -998,6 +998,10 @@ class OnyxService(OnyxInterface):
             # Extract documents from the response
             top_documents = response_data.get('top_documents', [])
             
+            # Handle None case
+            if top_documents is None:
+                top_documents = []
+            
             # Limit results if requested
             if num_results and len(top_documents) > num_results:
                 top_documents = top_documents[:num_results]

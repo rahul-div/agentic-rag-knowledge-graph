@@ -122,6 +122,33 @@ class EntityTimelineInput(BaseModel):
     end_date: Optional[str] = Field(None, description="End date (ISO format)")
 
 
+class OnyxSearchInput(BaseModel):
+    """Input for Onyx search tool."""
+
+    query: str = Field(..., description="Search query")
+    num_results: int = Field(default=5, description="Number of results to return (1-10)")
+    search_type: str = Field(default="hybrid", description="Type of search: 'hybrid', 'semantic', or 'keyword'")
+
+
+class OnyxAnswerInput(BaseModel):
+    """Input for Onyx answer with quote tool."""
+
+    query: str = Field(..., description="Question to answer")
+    num_docs: int = Field(default=5, description="Number of documents to use for answering")
+    include_quotes: bool = Field(default=True, description="Whether to include supporting quotes")
+    search_type: str = Field(default="hybrid", description="Type of search: 'hybrid', 'semantic', or 'keyword'")
+
+class ComprehensiveSearchInput(BaseModel):
+    """Input for comprehensive search combining multiple systems."""
+
+    query: str = Field(..., description="Search query")
+    num_results: int = Field(default=5, description="Number of results per search type")
+    include_onyx: bool = Field(default=True, description="Include Onyx cloud search")
+    include_vector: bool = Field(default=True, description="Include vector search") 
+    include_graph: bool = Field(default=True, description="Include knowledge graph search")
+    search_type: str = Field(default="hybrid", description="Search type for compatible systems")
+
+
 # Tool Implementation Functions
 async def vector_search_tool(input_data: VectorSearchInput) -> List[ChunkResult]:
     """
@@ -397,3 +424,202 @@ async def perform_comprehensive_search(
     )
 
     return results
+
+
+# Onyx Cloud Integration Tools
+async def onyx_search_tool(input_data: OnyxSearchInput) -> Dict[str, Any]:
+    """
+    Search documents using Onyx Cloud's enterprise search capabilities.
+
+    Args:
+        input_data: Search parameters
+
+    Returns:
+        Dictionary containing search results with documents and metadata
+    """
+    try:
+        # Import here to avoid circular import issues
+        from onyx.service import OnyxService
+        
+        # Initialize Onyx service
+        onyx_service = OnyxService()
+        
+        # Perform search using Onyx
+        search_results = await asyncio.to_thread(
+            onyx_service.search_documents,
+            query=input_data.query,
+            num_results=input_data.num_results,
+            search_type=input_data.search_type
+        )
+        
+        logger.debug(f"Onyx search returned {search_results.get('total_results', 0)} results for query: {input_data.query[:50]}...")
+        
+        return {
+            "search_type": "onyx_search",
+            "query": input_data.query,
+            "results": search_results,
+            "total_found": search_results.get('total_results', 0),
+            "search_parameters": {
+                "num_results": input_data.num_results,
+                "search_type": input_data.search_type
+            }
+        }
+    
+    except Exception as e:
+        logger.error(f"Onyx search failed: {e}")
+        return {
+            "search_type": "onyx_search",
+            "query": input_data.query,
+            "results": {"top_documents": [], "total_results": 0},
+            "total_found": 0,
+            "error": str(e)
+        }
+
+
+async def onyx_answer_with_quote_tool(input_data: OnyxAnswerInput) -> Dict[str, Any]:
+    """
+    Get answers with supporting quotes using Onyx Cloud's QA capabilities.
+
+    Args:
+        input_data: Question and answering parameters
+
+    Returns:
+        Dictionary containing answer, quotes, and source documents
+    """
+    try:
+        # Import here to avoid circular import issues
+        from onyx.service import OnyxService
+        
+        # Initialize Onyx service
+        onyx_service = OnyxService()
+        
+        # Get answer with quotes using Onyx
+        answer_response = await asyncio.to_thread(
+            onyx_service.answer_with_quote,
+            query=input_data.query,
+            num_docs=input_data.num_docs,
+            include_quotes=input_data.include_quotes,
+            search_type=input_data.search_type
+        )
+        
+        logger.debug(f"Onyx answered query: {input_data.query[:50]}... with {len(answer_response.get('quotes', []))} quotes")
+        
+        return {
+            "search_type": "onyx_answer",
+            "query": input_data.query,
+            "answer": answer_response.get('answer', ''),
+            "answer_citationless": answer_response.get('answer_citationless', ''),
+            "quotes": answer_response.get('quotes', []),
+            "top_documents": answer_response.get('top_documents', []),
+            "contexts": answer_response.get('contexts', {}),
+            "search_parameters": {
+                "num_docs": input_data.num_docs,
+                "include_quotes": input_data.include_quotes,
+                "search_type": input_data.search_type
+            }
+        }
+    
+    except Exception as e:
+        logger.error(f"Onyx answer with quote failed: {e}")
+        return {
+            "search_type": "onyx_answer",
+            "query": input_data.query,
+            "answer": f"Error: Unable to answer question due to {str(e)}",
+            "answer_citationless": f"Error: Unable to answer question due to {str(e)}",
+            "quotes": [],
+            "top_documents": [],
+            "contexts": {},
+            "error": str(e)
+        }
+
+
+async def comprehensive_search_tool(input_data: ComprehensiveSearchInput) -> Dict[str, Any]:
+    """
+    Perform comprehensive search combining Onyx, vector, and knowledge graph systems.
+
+    Args:
+        input_data: Comprehensive search parameters
+
+    Returns:
+        Dictionary containing unified results from multiple search systems
+    """
+    try:
+        results = {
+            "search_type": "comprehensive_search",
+            "query": input_data.query,
+            "onyx_results": {},
+            "vector_results": [],
+            "graph_results": [],
+            "combined_summary": "",
+            "total_sources": 0
+        }
+        
+        # Collect search tasks
+        search_tasks = []
+        
+        # Add Onyx search if requested
+        if input_data.include_onyx:
+            onyx_input = OnyxSearchInput(
+                query=input_data.query,
+                num_results=input_data.num_results,
+                search_type=input_data.search_type
+            )
+            search_tasks.append(("onyx", onyx_search_tool(onyx_input)))
+        
+        # Add vector search if requested
+        if input_data.include_vector:
+            vector_input = VectorSearchInput(
+                query=input_data.query,
+                limit=input_data.num_results
+            )
+            search_tasks.append(("vector", vector_search_tool(vector_input)))
+        
+        # Add graph search if requested
+        if input_data.include_graph:
+            graph_input = GraphSearchInput(query=input_data.query)
+            search_tasks.append(("graph", graph_search_tool(graph_input)))
+        
+        # Execute all searches concurrently
+        if search_tasks:
+            search_results = await asyncio.gather(*[task[1] for task in search_tasks], return_exceptions=True)
+            
+            # Process results
+            for i, (search_type, _) in enumerate(search_tasks):
+                if not isinstance(search_results[i], Exception):
+                    if search_type == "onyx":
+                        results["onyx_results"] = search_results[i]
+                        results["total_sources"] += search_results[i].get("total_found", 0)
+                    elif search_type == "vector":
+                        results["vector_results"] = search_results[i]
+                        results["total_sources"] += len(search_results[i])
+                    elif search_type == "graph":
+                        results["graph_results"] = search_results[i]
+                        results["total_sources"] += len(search_results[i])
+        
+        # Create combined summary
+        summary_parts = []
+        if results["onyx_results"] and results["onyx_results"].get("total_found", 0) > 0:
+            summary_parts.append(f"Onyx: {results['onyx_results'].get('total_found', 0)} documents")
+        if results["vector_results"]:
+            summary_parts.append(f"Vector: {len(results['vector_results'])} chunks")
+        if results["graph_results"]:
+            summary_parts.append(f"Knowledge Graph: {len(results['graph_results'])} facts")
+        
+        results["combined_summary"] = f"Found information across {len(summary_parts)} systems: {', '.join(summary_parts)}"
+        
+        logger.debug(f"Comprehensive search completed for query: {input_data.query[:50]}... - {results['combined_summary']}")
+        
+        return results
+    
+    except Exception as e:
+        logger.error(f"Comprehensive search failed: {e}")
+        return {
+            "search_type": "comprehensive_search",
+            "query": input_data.query,
+            "onyx_results": {},
+            "vector_results": [],
+            "graph_results": [],
+            "combined_summary": f"Search failed due to error: {str(e)}",
+            "total_sources": 0,
+            "error": str(e)
+        }
