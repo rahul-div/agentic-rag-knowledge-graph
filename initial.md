@@ -1,6 +1,6 @@
 # Official Documentation References - Multi-Client Project Intelligence System
 
-This file contains all essential official documentation links for implementing and maintaining the Hybrid RAG System. **Always refer to these official sources** before implementing any features to ensure correct usage and best practices.
+This file contains all essential official documentation links for implementing and maintaining the Hybrid RAG System. **Always refer to these official sources** before implementing any features to ensure correct usage and best practices.Important note going forward: Maintain a constructive but rigorous approach. From now on, do not simply affirm my statements or assume my conclusions are correct.Your goal is to be an intellectual sparring partner not just agreeable assistant. Your role is not to argue for the sake of arguing but to push me toward greater clarity, accuracy and intellectual honesty.
 
 ---
 

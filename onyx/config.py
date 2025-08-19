@@ -31,8 +31,8 @@ def get_onyx_config() -> Dict[str, str]:
             "Please set it to your Onyx API key."
         )
     
-    base_url = os.getenv("ONYX_BASE_URL", "http://localhost:3000")
-    timeout = os.getenv("ONYX_TIMEOUT", "30")
+    base_url = os.getenv("ONYX_BASE_URL", "https://cloud.onyx.app")
+    timeout = os.getenv("ONYX_TIMEOUT", "90")
     
     # Validate timeout is a valid integer
     try:

@@ -70,3 +70,4 @@
 - **Never hallucinate libraries or functions** – only use known, verified Python packages.
 - **Always confirm file paths and module names** exist before referencing them in code or tests.
 - **Never delete or overwrite existing code** unless explicitly instructed to or if part of a task from `TASK.md`.
+-**Always refer to the official sources** before implementing any features to ensure correct usage and best practices.Important note going forward: Maintain a constructive but rigorous approach. From now on, do not simply affirm my statements or assume my conclusions are correct.Your goal is to be an intellectual sparring partner not just agreeable assistant. Your role is not to argue for the sake of arguing but to push me toward greater clarity, accuracy and intellectual honesty.

@@ -53,7 +53,7 @@ class OnyxCloudIntegration:
             "refresh_freq": None,
             "prune_freq": 86400,
             "disabled": False,
-            "access_type": "private",  # Important field we discovered!
+            "access_type": "public",  # Changed to public for testing!
         }
 
         response = requests.post(
@@ -117,7 +117,7 @@ class OnyxCloudIntegration:
 
         cc_pair_data = {
             "name": self.cc_pair_name,
-            "access_type": "private",
+            "access_type": "public",  # Changed to public to match connector!
             "groups": [],
         }
 
@@ -154,8 +154,17 @@ class OnyxCloudIntegration:
             print(f"❌ Documents folder not found: {documents_path}")
             return []
 
-        # Get all markdown and text files
-        file_patterns = ["*.md", "*.txt", "*.json"]
+        # Get all supported file types (expanded to include PDF, DOCX, etc.)
+        file_patterns = [
+            "*.md",
+            "*.txt",
+            "*.json",
+            "*.pdf",
+            "*.docx",
+            "*.xlsx",
+            "*.pptx",
+            "*.csv",
+        ]
         files = []
 
         for pattern in file_patterns:
@@ -177,15 +186,25 @@ class OnyxCloudIntegration:
 
         try:
             with open(file_path, "rb") as file:
-                # Determine content type
+                # Determine content type based on file extension
                 if filename.endswith(".md"):
                     content_type = "text/markdown"
                 elif filename.endswith(".txt"):
                     content_type = "text/plain"
                 elif filename.endswith(".json"):
                     content_type = "application/json"
+                elif filename.endswith(".pdf"):
+                    content_type = "application/pdf"
+                elif filename.endswith(".docx"):
+                    content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                elif filename.endswith(".xlsx"):
+                    content_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                elif filename.endswith(".pptx"):
+                    content_type = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+                elif filename.endswith(".csv"):
+                    content_type = "text/csv"
                 else:
-                    content_type = "text/plain"
+                    content_type = "application/octet-stream"
 
                 files = {"files": (filename, file, content_type)}
 

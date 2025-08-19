@@ -208,6 +208,62 @@ class OnyxInterface(ABC):
         """
         pass
 
+    @abstractmethod
+    def verify_cc_pair_status(self, cc_pair_id: int) -> bool:
+        """
+        Verify CC-pair status and readiness for search.
+
+        Args:
+            cc_pair_id (int): CC-pair ID to verify
+
+        Returns:
+            bool: True if CC-pair is ready for search
+
+        Raises:
+            Exception: If verification fails
+        """
+        pass
+
+    @abstractmethod
+    def create_document_set_validated(
+        self, cc_pair_id: int, name: str, description: str = ""
+    ) -> Optional[int]:
+        """
+        Create document set using validated endpoints with fallback logic.
+
+        Args:
+            cc_pair_id (int): CC-pair ID to include in document set
+            name (str): Name for the document set
+            description (str): Description for the document set
+
+        Returns:
+            Optional[int]: Document set ID if successful, None if failed
+
+        Raises:
+            Exception: If creation fails
+        """
+        pass
+
+    @abstractmethod
+    def search_with_document_set_validated(
+        self, query: str, document_set_id: int, max_retries: int = 3
+    ) -> Dict[str, Any]:
+        """
+        Execute search with document set restriction using validated implementation.
+
+        Args:
+            query (str): Search query
+            document_set_id (int): Document set ID to restrict search to
+            max_retries (int): Maximum number of retry attempts
+
+        Returns:
+            Dict[str, Any]: Search results with success status, answer, and source documents
+
+        Raises:
+            Exception: If search fails
+        """
+        pass
+
 
 class MockOnyxService(OnyxInterface):
     """
