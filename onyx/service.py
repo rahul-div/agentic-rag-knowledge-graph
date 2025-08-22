@@ -1145,7 +1145,7 @@ class OnyxService(OnyxInterface):
         self, 
         query: str, 
         document_set_id: int, 
-        max_retries: int = 3
+        max_retries: int = 7
     ) -> Dict[str, Any]:
         """
         Execute search with document set restriction using validated implementation.
@@ -1267,15 +1267,15 @@ class OnyxService(OnyxInterface):
                 else:
                     logger.warning(f"Search failed with status {response.status_code} on attempt {attempt}")
                 
-                # Wait before retry (except last attempt)
+                # Wait before retry (except last attempt) - increased delay for stability
                 if attempt < max_retries:
-                    time.sleep(3)
+                    time.sleep(5)  # Increased from 3 to 5 seconds
                     
             except Exception as e:
                 logger.warning(f"Search attempt {attempt} failed: {e}")
                 if attempt == max_retries:
                     raise OnyxAPIError(f"Search failed after {max_retries} attempts: {e}") from e
-                time.sleep(3)
+                time.sleep(5)  # Increased from 3 to 5 seconds
         
         return {
             "success": False,

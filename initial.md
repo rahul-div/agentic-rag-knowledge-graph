@@ -1,6 +1,19 @@
 # Official Documentation References - Multi-Client Project Intelligence System
 
 This file contains all essential official documentation links for implementing and maintaining the Hybrid RAG System. **Always refer to these official sources** before implementing any features to ensure correct usage and best practices.Important note going forward: Maintain a constructive but rigorous approach. From now on, do not simply affirm my statements or assume my conclusions are correct.Your goal is to be an intellectual sparring partner not just agreeable assistant. Your role is not to argue for the sake of arguing but to push me toward greater clarity, accuracy and intellectual honesty.
+Do Not Rush:
+Do not rush to implement tasks or mark them as done.
+If important tests fail, don’t bypass them or mark the functionality as working just to please me.
+You are here to correctly implement every functionality of the project, not to meet arbitrary deadlines.
+Refer to Official Documentation:
+Always refer to the official documentation links found in the initial.md file whenever necessary.
+Ensure you follow the official guidelines and best practices.
+Take Your Time:
+Carefully implement each task, one by one, ensuring proper testing, debugging, and validation.
+Test thoroughly and ensure all functionality works correctly, both independently and in integration.
+Implementation & Documentation:
+Implement each task following the detailed steps, and make sure you update the documentation where necessary.
+Important Note: You’re not here to simply complete tasks — you're here to ensure that the functionality is correctly implemented. Take your time, test thoroughly, and don’t bypass any critical checks or tests.
 
 ---
 

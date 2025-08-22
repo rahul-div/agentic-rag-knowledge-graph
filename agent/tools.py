@@ -426,200 +426,478 @@ async def perform_comprehensive_search(
     return results
 
 
-# Onyx Cloud Integration Tools
-async def onyx_search_tool(input_data: OnyxSearchInput) -> Dict[str, Any]:
+# Onyx Cloud Integration Tools - VALIDATED IMPLEMENTATION  
+# Based on successful standalone interactive_onyx_agent.py implementation
+# Uses proven document set strategy with robust fallback to Graphiti/pgvector
+
+async def onyx_search_tool(input_data: OnyxSearchInput, onyx_service=None, document_set_id=None) -> Dict[str, Any]:
     """
-    Search documents using Onyx Cloud's enterprise search capabilities.
+    Search documents using Onyx Cloud's validated enterprise search capabilities.
+    
+    Uses the proven search_with_document_set_validated method from our standalone implementation
+    with intelligent fallback to simple_chat when document set search fails.
 
     Args:
         input_data: Search parameters
+        onyx_service: Injected OnyxService instance (dependency injection)
+        document_set_id: Document set ID for targeted search
 
     Returns:
         Dictionary containing search results with documents and metadata
     """
     try:
-        # Import here to avoid circular import issues
-        from onyx.service import OnyxService
+        # Require dependency injection - no fallback service creation
+        if onyx_service is None:
+            logger.warning("No OnyxService provided via dependency injection")
+            return {
+                "search_type": "onyx_search_failed",
+                "query": input_data.query,
+                "answer": "",
+                "source_documents": [],
+                "total_found": 0,
+                "success": False,
+                "error": "OnyxService not available - dependency injection required",
+                "fallback_recommended": True
+            }
         
-        # Initialize Onyx service
-        onyx_service = OnyxService()
+        # Primary: Use validated document set search if available
+        if document_set_id:
+            logger.info(f"Using Onyx document set {document_set_id} for query: {input_data.query}")
+            search_results = await asyncio.to_thread(
+                onyx_service.search_with_document_set_validated,
+                query=input_data.query,
+                document_set_id=document_set_id,
+                max_retries=3  # Reduced retries for hybrid system responsiveness
+            )
+            
+            if search_results.get("success"):
+                source_docs = search_results.get("source_documents", [])
+                return {
+                    "search_type": "onyx_search_document_set",
+                    "query": input_data.query,
+                    "answer": search_results.get("answer", ""),
+                    "source_documents": source_docs,
+                    "document_set_id": document_set_id,
+                    "attempt": search_results.get("attempt", 1),
+                    "total_found": len(source_docs),
+                    "success": True,
+                    "confidence": "high"  # Document set search is most reliable
+                }
+            else:
+                logger.warning(f"Document set search failed: {search_results.get('error', 'Unknown error')}")
         
-        # Perform search using Onyx
-        search_results = await asyncio.to_thread(
-            onyx_service.search_documents,
-            query=input_data.query,
-            num_results=input_data.num_results,
-            search_type=input_data.search_type
+        # Secondary fallback: Use simple_chat for general search
+        logger.info(f"Falling back to Onyx simple_chat for query: {input_data.query}")
+        simple_result = await asyncio.to_thread(
+            onyx_service.simple_chat,
+            message=f"Search for information about: {input_data.query}"
         )
         
-        logger.debug(f"Onyx search returned {search_results.get('total_results', 0)} results for query: {input_data.query[:50]}...")
-        
-        return {
-            "search_type": "onyx_search",
-            "query": input_data.query,
-            "results": search_results,
-            "total_found": search_results.get('total_results', 0),
-            "search_parameters": {
-                "num_results": input_data.num_results,
-                "search_type": input_data.search_type
+        if simple_result and simple_result.strip():
+            return {
+                "search_type": "onyx_search_simple",
+                "query": input_data.query,
+                "answer": simple_result,
+                "source_documents": [],
+                "total_found": 1,
+                "success": True,
+                "confidence": "medium",
+                "fallback_used": True
             }
-        }
-    
+        else:
+            # Complete fallback failure - recommend hybrid search
+            return {
+                "search_type": "onyx_search_failed",
+                "query": input_data.query,
+                "answer": "",
+                "source_documents": [],
+                "total_found": 0,
+                "success": False,
+                "error": "Both document set and simple search failed",
+                "fallback_recommended": True,
+                "confidence": "none"
+            }
+        
     except Exception as e:
-        logger.error(f"Onyx search failed: {e}")
+        logger.error(f"Onyx search failed with exception: {e}")
         return {
-            "search_type": "onyx_search",
+            "search_type": "onyx_search_error",
             "query": input_data.query,
-            "results": {"top_documents": [], "total_results": 0},
+            "answer": "",
+            "source_documents": [],
             "total_found": 0,
-            "error": str(e)
+            "success": False,
+            "error": str(e),
+            "fallback_recommended": True
         }
 
 
-async def onyx_answer_with_quote_tool(input_data: OnyxAnswerInput) -> Dict[str, Any]:
+async def onyx_answer_with_quote_tool(input_data: OnyxAnswerInput, onyx_service=None, document_set_id=None) -> Dict[str, Any]:
     """
-    Get answers with supporting quotes using Onyx Cloud's QA capabilities.
+    Get answers with supporting quotes using Onyx Cloud's validated QA capabilities.
+    
+    Uses the proven answer_with_quote method from our standalone implementation
+    with intelligent fallback patterns for hybrid system integration.
 
     Args:
         input_data: Question and answering parameters
+        onyx_service: Injected OnyxService instance (dependency injection)
+        document_set_id: Document set ID for targeted search
 
     Returns:
         Dictionary containing answer, quotes, and source documents
     """
     try:
-        # Import here to avoid circular import issues
-        from onyx.service import OnyxService
+        # Require dependency injection - no fallback service creation
+        if onyx_service is None:
+            logger.warning("No OnyxService provided via dependency injection") 
+            return {
+                "search_type": "onyx_answer_failed",
+                "query": input_data.query,
+                "answer": "",
+                "answer_citationless": "",
+                "quotes": [],
+                "source_documents": [],
+                "success": False,
+                "error": "OnyxService not available - dependency injection required",
+                "fallback_recommended": True
+            }
         
-        # Initialize Onyx service
-        onyx_service = OnyxService()
+        # Primary: Try document set search if available
+        if document_set_id:
+            logger.info(f"Using Onyx document set {document_set_id} for question: {input_data.query}")
+            search_results = await asyncio.to_thread(
+                onyx_service.search_with_document_set_validated,
+                query=input_data.query,
+                document_set_id=document_set_id,
+                max_retries=3
+            )
+            
+            if search_results.get("success"):
+                source_docs = search_results.get("source_documents", [])
+                answer = search_results.get("answer", "")
+                return {
+                    "search_type": "onyx_answer_document_set", 
+                    "query": input_data.query,
+                    "answer": answer,
+                    "answer_citationless": answer,  # Document set doesn't separate citations
+                    "source_documents": source_docs,
+                    "document_set_id": document_set_id,
+                    "attempt": search_results.get("attempt", 1),
+                    "success": True,
+                    "confidence": "high",
+                    "quotes": []  # Document set format doesn't provide quote structure
+                }
+            else:
+                logger.warning(f"Document set answer failed: {search_results.get('error', 'Unknown error')}")
         
-        # Get answer with quotes using Onyx
+        # Secondary: Use answer_with_quote method for comprehensive response  
+        logger.info(f"Using Onyx answer_with_quote for question: {input_data.query}")
         answer_response = await asyncio.to_thread(
             onyx_service.answer_with_quote,
             query=input_data.query,
             num_docs=input_data.num_docs,
-            include_quotes=input_data.include_quotes,
-            search_type=input_data.search_type
+            include_quotes=input_data.include_quotes
         )
         
-        logger.debug(f"Onyx answered query: {input_data.query[:50]}... with {len(answer_response.get('quotes', []))} quotes")
-        
-        return {
-            "search_type": "onyx_answer",
-            "query": input_data.query,
-            "answer": answer_response.get('answer', ''),
-            "answer_citationless": answer_response.get('answer_citationless', ''),
-            "quotes": answer_response.get('quotes', []),
-            "top_documents": answer_response.get('top_documents', []),
-            "contexts": answer_response.get('contexts', {}),
-            "search_parameters": {
-                "num_docs": input_data.num_docs,
-                "include_quotes": input_data.include_quotes,
-                "search_type": input_data.search_type
+        if answer_response and answer_response.get('answer'):
+            return {
+                "search_type": "onyx_answer_comprehensive",
+                "query": input_data.query,
+                "answer": answer_response.get('answer', ''),
+                "answer_citationless": answer_response.get('answer_citationless', ''),
+                "quotes": answer_response.get('quotes', []),
+                "source_documents": answer_response.get('top_documents', []),
+                "contexts": answer_response.get('contexts', {}),
+                "success": True,
+                "confidence": "medium",
+                "search_parameters": {
+                    "num_docs": input_data.num_docs,
+                    "include_quotes": input_data.include_quotes,
+                    "search_type": input_data.search_type
+                }
             }
-        }
+        else:
+            # Complete failure - recommend hybrid fallback
+            return {
+                "search_type": "onyx_answer_failed",
+                "query": input_data.query,
+                "answer": "",
+                "answer_citationless": "",
+                "quotes": [],
+                "source_documents": [],
+                "success": False,
+                "error": "Both document set and answer_with_quote failed",
+                "fallback_recommended": True,
+                "confidence": "none"
+            }
     
     except Exception as e:
-        logger.error(f"Onyx answer with quote failed: {e}")
+        logger.error(f"Onyx answer with quote failed with exception: {e}")
         return {
-            "search_type": "onyx_answer",
+            "search_type": "onyx_answer_error",
             "query": input_data.query,
-            "answer": f"Error: Unable to answer question due to {str(e)}",
-            "answer_citationless": f"Error: Unable to answer question due to {str(e)}",
+            "answer": f"Unable to answer question due to service error: {str(e)}",
+            "answer_citationless": f"Service error occurred",
             "quotes": [],
-            "top_documents": [],
+            "source_documents": [],
             "contexts": {},
-            "error": str(e)
+            "success": False,
+            "error": str(e),
+            "fallback_recommended": True
         }
 
 
-async def comprehensive_search_tool(input_data: ComprehensiveSearchInput) -> Dict[str, Any]:
+async def comprehensive_search_tool(input_data: ComprehensiveSearchInput, onyx_service=None, document_set_id=None) -> Dict[str, Any]:
     """
     Perform comprehensive search combining Onyx, vector, and knowledge graph systems.
+    
+    Implements intelligent fallback strategy based on our validated hybrid patterns:
+    1. Try Onyx Cloud first (highest quality, document set based)
+    2. Fall back to Graphiti vector + graph search 
+    3. Combine results intelligently based on success rates
 
     Args:
-        input_data: Comprehensive search parameters
+        input_data: Comprehensive search parameters 
+        onyx_service: Injected OnyxService instance (dependency injection)
+        document_set_id: Document set ID for targeted Onyx search
 
     Returns:
         Dictionary containing unified results from multiple search systems
     """
     try:
         results = {
-            "search_type": "comprehensive_search",
+            "search_type": "comprehensive_hybrid_search",
             "query": input_data.query,
             "onyx_results": {},
             "vector_results": [],
             "graph_results": [],
             "combined_summary": "",
-            "total_sources": 0
+            "total_sources": 0,
+            "systems_used": [],
+            "primary_answer": "",
+            "fallback_chain": [],
+            "confidence": "low"
         }
         
-        # Collect search tasks
-        search_tasks = []
+        # Step 1: Try Onyx Cloud first (highest priority)
+        onyx_success = False
+        if input_data.include_onyx and onyx_service is not None:
+            try:
+                logger.info(f"Starting Onyx search for query: {input_data.query}")
+                onyx_input = OnyxSearchInput(
+                    query=input_data.query,
+                    num_results=input_data.num_results,
+                    search_type=input_data.search_type
+                )
+                onyx_result = await onyx_search_tool(onyx_input, onyx_service, document_set_id)
+                results["onyx_results"] = onyx_result
+                results["fallback_chain"].append("onyx_attempted")
+                
+                if onyx_result.get("success", False) and onyx_result.get("answer"):
+                    onyx_success = True
+                    results["systems_used"].append("Onyx Cloud")
+                    results["total_sources"] += onyx_result.get("total_found", 0)
+                    results["primary_answer"] = onyx_result["answer"]
+                    results["confidence"] = onyx_result.get("confidence", "medium")
+                    results["fallback_chain"].append("onyx_success")
+                    
+                    logger.info(f"✅ Onyx search successful, found {onyx_result.get('total_found', 0)} sources")
+                    
+                    # For comprehensive_search, ALWAYS continue to other systems for true synthesis
+                    # No early exits - we want comprehensive multi-system analysis
+                    logger.info("🔄 Continuing to Graphiti systems for comprehensive synthesis...")
+                else:
+                    logger.warning(f"❌ Onyx search failed or returned no results")
+                    results["fallback_chain"].append("onyx_failed")
+                        
+            except Exception as e:
+                logger.error(f"❌ Onyx search failed with exception: {e}")
+                results["onyx_results"] = {"error": str(e), "success": False}
+                results["fallback_chain"].append("onyx_error")
+        else:
+            if not input_data.include_onyx:
+                results["fallback_chain"].append("onyx_disabled")
+            else:
+                results["fallback_chain"].append("onyx_unavailable")
         
-        # Add Onyx search if requested
-        if input_data.include_onyx:
-            onyx_input = OnyxSearchInput(
-                query=input_data.query,
-                num_results=input_data.num_results,
-                search_type=input_data.search_type
-            )
-            search_tasks.append(("onyx", onyx_search_tool(onyx_input)))
-        
-        # Add vector search if requested
+        # Step 2: Graphiti fallback (vector + graph search)
+        graphiti_tasks = []
         if input_data.include_vector:
-            vector_input = VectorSearchInput(
+            results["fallback_chain"].append("vector_search_started")
+            graphiti_tasks.append(("vector", vector_search_tool(VectorSearchInput(
                 query=input_data.query,
                 limit=input_data.num_results
-            )
-            search_tasks.append(("vector", vector_search_tool(vector_input)))
+            ))))
         
-        # Add graph search if requested
         if input_data.include_graph:
-            graph_input = GraphSearchInput(query=input_data.query)
-            search_tasks.append(("graph", graph_search_tool(graph_input)))
+            results["fallback_chain"].append("graph_search_started")
+            graphiti_tasks.append(("graph", graph_search_tool(GraphSearchInput(query=input_data.query))))
         
-        # Execute all searches concurrently
-        if search_tasks:
-            search_results = await asyncio.gather(*[task[1] for task in search_tasks], return_exceptions=True)
+        # Execute Graphiti searches (as fallback or complement)
+        if graphiti_tasks:
+            logger.info(f"Running Graphiti fallback with {len(graphiti_tasks)} search types")
+            search_results = await asyncio.gather(
+                *[task for _, task in graphiti_tasks],
+                return_exceptions=True
+            )
             
-            # Process results
-            for i, (search_type, _) in enumerate(search_tasks):
-                if not isinstance(search_results[i], Exception):
-                    if search_type == "onyx":
-                        results["onyx_results"] = search_results[i]
-                        results["total_sources"] += search_results[i].get("total_found", 0)
-                    elif search_type == "vector":
-                        results["vector_results"] = search_results[i]
-                        results["total_sources"] += len(search_results[i])
-                    elif search_type == "graph":
-                        results["graph_results"] = search_results[i]
-                        results["total_sources"] += len(search_results[i])
+            # Process Graphiti results
+            for i, (search_type, search_result) in enumerate(zip([t[0] for t in graphiti_tasks], search_results)):
+                if isinstance(search_result, Exception):
+                    logger.error(f"❌ {search_type} search failed: {search_result}")
+                    results["fallback_chain"].append(f"{search_type}_error")
+                    continue
+                    
+                if search_type == "vector" and search_result:
+                    results["vector_results"] = search_result
+                    results["systems_used"].append("Graphiti Vector")
+                    results["total_sources"] += len(search_result)
+                    results["fallback_chain"].append("vector_success")
+                    logger.info(f"✅ Vector search found {len(search_result)} results")
+                    
+                elif search_type == "graph" and search_result:
+                    results["graph_results"] = search_result
+                    results["systems_used"].append("Graphiti Graph")
+                    if hasattr(search_result, 'entities'):
+                        results["total_sources"] += len(search_result.entities)
+                    results["fallback_chain"].append("graph_success")
+                    logger.info(f"✅ Graph search completed successfully")
         
-        # Create combined summary
+        # Step 3: Intelligent Multi-System Synthesis
+        if onyx_success and (results["vector_results"] or results["graph_results"]):
+            # TRUE COMPREHENSIVE SYNTHESIS - Combine insights from all systems
+            logger.info("🧠 Performing comprehensive multi-system synthesis...")
+            
+            # Start with Onyx as the factual foundation
+            primary_content = results["onyx_results"]["answer"]
+            
+            # Add relationship context from knowledge graph
+            relationship_insights = []
+            if results["graph_results"]:
+                for fact in results["graph_results"][:3]:  # Top 3 most relevant facts
+                    if hasattr(fact, 'fact'):
+                        relationship_insights.append(fact.fact)
+                    elif isinstance(fact, dict) and "fact" in fact:
+                        relationship_insights.append(fact["fact"])
+                
+                if relationship_insights:
+                    results["fallback_chain"].append("graph_synthesis_added")
+            
+            # Add supporting evidence from vector search
+            supporting_evidence = []
+            if results["vector_results"]:
+                for chunk in results["vector_results"][:2]:  # Top 2 supporting chunks
+                    # ChunkResult objects use dot notation, not dictionary access
+                    if hasattr(chunk, 'score') and chunk.score > 0.7:  # Only high-confidence chunks
+                        content_preview = chunk.content[:200] + "..." if len(chunk.content) > 200 else chunk.content
+                        supporting_evidence.append({
+                            "content": content_preview,
+                            "source": chunk.document_title if hasattr(chunk, 'document_title') else "Unknown",
+                            "relevance": chunk.score
+                        })
+                
+                if supporting_evidence:
+                    results["fallback_chain"].append("vector_synthesis_added")
+            
+            # Create comprehensive synthesized answer
+            synthesized_parts = [f"**Primary Answer (Onyx Cloud):** {primary_content}"]
+            
+            if relationship_insights:
+                relationships_text = " | ".join(relationship_insights[:2])  # Top 2 relationships
+                synthesized_parts.append(f"**Relationship Context (Knowledge Graph):** {relationships_text}")
+            
+            if supporting_evidence:
+                evidence_text = f"Additional context from {len(supporting_evidence)} supporting sources"
+                if supporting_evidence[0]:
+                    evidence_text += f": {supporting_evidence[0]['content'][:150]}..."
+                synthesized_parts.append(f"**Supporting Evidence (Vector Search):** {evidence_text}")
+            
+            # Create unified comprehensive response
+            results["primary_answer"] = "\n\n".join(synthesized_parts)
+            results["synthesis_type"] = "comprehensive_multi_system"
+            results["confidence"] = "very_high"  # Multi-system validation
+            results["fallback_chain"].append("multi_system_synthesis_complete")
+            
+        elif onyx_success:
+            # Only Onyx succeeded - use as primary with high confidence
+            results["synthesis_type"] = "onyx_primary"
+            results["confidence"] = "high"
+            results["fallback_chain"].append("onyx_only")
+            
+        elif results["vector_results"] or results["graph_results"]:
+            # Onyx failed, use Graphiti results as primary
+            if results["vector_results"]:
+                # Use best vector result as primary answer
+                best_chunk = max(results["vector_results"], key=lambda x: x.score if hasattr(x, 'score') else 0)
+                content = best_chunk.content if hasattr(best_chunk, 'content') else str(best_chunk)
+                results["primary_answer"] = f"**Vector Search Result:** {content[:500]}..."
+                results["synthesis_type"] = "vector_primary"
+                results["confidence"] = "medium"
+                results["fallback_chain"].append("vector_primary")
+                
+                # Add graph context if available
+                if results["graph_results"]:
+                    graph_context = []
+                    for fact in results["graph_results"][:2]:
+                        if hasattr(fact, 'fact'):
+                            graph_context.append(fact.fact)
+                        elif isinstance(fact, dict) and "fact" in fact:
+                            graph_context.append(fact["fact"])
+                    
+                    if graph_context:
+                        results["primary_answer"] += f"\n\n**Related Knowledge:** {' | '.join(graph_context)}"
+                        results["synthesis_type"] = "vector_graph_synthesis"
+                        
+            elif results["graph_results"]:
+                # Use graph results summary 
+                results["primary_answer"] = f"**Knowledge Graph Results:** Found related information for query: {input_data.query}"
+                results["synthesis_type"] = "graph_primary"
+                results["confidence"] = "low"
+                results["fallback_chain"].append("graph_primary")
+        else:
+            # No results from any system
+            results["synthesis_type"] = "no_results"
+            results["confidence"] = "none"
+                
+        # Step 4: Generate combined summary
         summary_parts = []
-        if results["onyx_results"] and results["onyx_results"].get("total_found", 0) > 0:
-            summary_parts.append(f"Onyx: {results['onyx_results'].get('total_found', 0)} documents")
+        if onyx_success:
+            summary_parts.append(f"Onyx Cloud: {results['onyx_results'].get('total_found', 0)} sources")
         if results["vector_results"]:
             summary_parts.append(f"Vector: {len(results['vector_results'])} chunks")
         if results["graph_results"]:
-            summary_parts.append(f"Knowledge Graph: {len(results['graph_results'])} facts")
+            summary_parts.append(f"Graph: relationships found")
+            
+        results["combined_summary"] = " | ".join(summary_parts) if summary_parts else "No results found"
         
-        results["combined_summary"] = f"Found information across {len(summary_parts)} systems: {', '.join(summary_parts)}"
-        
-        logger.debug(f"Comprehensive search completed for query: {input_data.query[:50]}... - {results['combined_summary']}")
+        # Set final confidence based on what worked
+        if onyx_success and results["total_sources"] > 0:
+            results["confidence"] = "high"
+        elif results["vector_results"] or results["graph_results"]:
+            results["confidence"] = "medium" 
+        else:
+            results["confidence"] = "low"
+            results["primary_answer"] = "No relevant information found across all search systems."
+            
+        logger.info(f"🎯 Comprehensive search completed: {results['combined_summary']}")
+        logger.info(f"🔗 Fallback chain: {' -> '.join(results['fallback_chain'])}")
         
         return results
     
     except Exception as e:
-        logger.error(f"Comprehensive search failed: {e}")
+        logger.error(f"Comprehensive search failed with exception: {e}")
         return {
-            "search_type": "comprehensive_search",
+            "search_type": "comprehensive_hybrid_search",
             "query": input_data.query,
             "onyx_results": {},
             "vector_results": [],
             "graph_results": [],
             "combined_summary": f"Search failed due to error: {str(e)}",
             "total_sources": 0,
+            "systems_used": [],
+            "primary_answer": f"Search error: {str(e)}",
+            "fallback_chain": ["error"],
+            "confidence": "none",
             "error": str(e)
         }

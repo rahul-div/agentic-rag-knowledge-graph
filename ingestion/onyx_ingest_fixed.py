@@ -218,101 +218,9 @@ class OnyxCloudIngestor:
         except Exception as e:
             raise OnyxIngestionError(f"Connector update failed: {e}")
     
-    async def trigger_indexing_and_monitor(self, timeout_minutes: int = 10) -> bool:
-        """
-        Trigger indexing and monitor progress (following validated standalone workflow).
-        
-        Args:
-            timeout_minutes: How long to monitor for completion
-            
-        Returns:
-            True if indexing completed successfully
-        """
-        try:
-            # Step 1: Trigger indexing
-            logger.info(f"🚀 Triggering indexing for connector {self.connector_id}")
-            response = await asyncio.to_thread(
-                requests.post,
-                f"{self.base_url}/api/manage/admin/connector/run-once",
-                headers={**self.headers, "Content-Type": "application/json"},
-                data=json.dumps({"connector_id": self.connector_id})
-            )
-            
-            if response.status_code != 200:
-                logger.warning(f"⚠️ Indexing trigger returned {response.status_code}: {response.text}")
-                return False
-            
-            logger.info(f"✅ Indexing triggered, monitoring progress for {timeout_minutes} minutes...")
-            
-            # Step 2: Monitor indexing progress (following standalone workflow)
-            start_time = time.time()
-            timeout_seconds = timeout_minutes * 60
-            check_interval = 10  # Check every 10 seconds for faster feedback
-            check_count = 0
-            
-            # Get initial state
-            initial_response = await asyncio.to_thread(
-                requests.get,
-                f"{self.base_url}/api/manage/admin/cc-pair/{self.cc_pair_id}",
-                headers=self.headers
-            )
-            
-            if initial_response.status_code != 200:
-                logger.error(f"❌ Cannot monitor - failed to get CC-pair status")
-                return False
-            
-            initial_data = initial_response.json()
-            initial_docs = initial_data.get("num_docs_indexed", 0)
-            
-            logger.info(f"📊 Initial docs indexed: {initial_docs}")
-            
-            # Monitor progress
-            while time.time() - start_time < timeout_seconds:
-                await asyncio.sleep(check_interval)
-                check_count += 1
-                elapsed_minutes = (time.time() - start_time) / 60
-                
-                response = await asyncio.to_thread(
-                    requests.get,
-                    f"{self.base_url}/api/manage/admin/cc-pair/{self.cc_pair_id}",
-                    headers=self.headers
-                )
-                
-                if response.status_code == 200:
-                    data = response.json()
-                    current_docs = data.get("num_docs_indexed", 0)
-                    indexing_status = data.get("indexing", False)
-                    last_attempt = data.get("last_index_attempt_status")
-                    
-                    logger.info(f"📊 Check {check_count} ({elapsed_minutes:.1f}min): Docs={current_docs}, Indexing={indexing_status}, Status={last_attempt}")
-                    
-                    # Success conditions (following standalone logic)
-                    if current_docs > initial_docs:
-                        logger.info(f"🎉 SUCCESS! Documents indexed: {initial_docs} → {current_docs}")
-                        return True
-                    
-                    if last_attempt == "success" and not indexing_status and current_docs > 0:
-                        logger.info(f"✅ Indexing completed! Total documents: {current_docs}")
-                        return True
-                    
-                    # Check for errors
-                    if last_attempt in ["failure", "canceled"] and not indexing_status:
-                        logger.warning(f"⚠️ Indexing {last_attempt} - may need manual investigation")
-                        return False
-                else:
-                    logger.warning(f"⚠️ Check {check_count}: Failed to get status ({response.status_code})")
-            
-            # Timeout reached
-            logger.warning(f"⏰ Indexing monitoring timeout after {timeout_minutes} minutes")
-            return False
-            
-        except Exception as e:
-            logger.error(f"❌ Indexing trigger/monitor failed: {e}")
-            return False
-
     async def trigger_indexing(self) -> bool:
         """
-        Simple indexing trigger (legacy method - use trigger_indexing_and_monitor for full workflow).
+        Trigger indexing for the connector.
         
         Returns:
             True if indexing trigger successful
@@ -399,14 +307,8 @@ async def ingest_to_onyx(
                 filename=upload_result["filename"]
             )
             
-            # Trigger indexing and monitor (following validated standalone workflow)
-            logger.info(f"🔄 Starting indexing workflow for {filename}")
-            indexing_success = await ingestor.trigger_indexing_and_monitor(timeout_minutes=5)
-            
-            if indexing_success:
-                logger.info(f"✅ Onyx ingestion complete: {filename} uploaded and indexed")
-            else:
-                logger.warning(f"⚠️ Onyx upload successful but indexing incomplete: {filename}")
+            # Trigger indexing (non-blocking)
+            await ingestor.trigger_indexing()
             
             return {
                 "success": True,
@@ -415,8 +317,7 @@ async def ingest_to_onyx(
                 "sections_count": 1,  # Single document = 1 section
                 "size": upload_result["size"],
                 "cc_pair_id": ingestor.cc_pair_id,
-                "connector_id": ingestor.connector_id,
-                "indexed": indexing_success
+                "connector_id": ingestor.connector_id
             }
         else:
             raise OnyxIngestionError("Upload failed without error details")

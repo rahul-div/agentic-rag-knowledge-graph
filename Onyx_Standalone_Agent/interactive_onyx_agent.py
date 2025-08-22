@@ -194,60 +194,39 @@ async def search_documents(ctx: RunContext[OnyxAgentDependencies], query: str) -
         
         logger.info(f"Searching in document set {ctx.deps.document_set_id}")
         
-        # Perform search using validated method
+        # Perform search using validated method with increased retry attempts
         result = ctx.deps.onyx_service.search_with_document_set_validated(
-            query, ctx.deps.document_set_id, max_retries=3
+            query, ctx.deps.document_set_id, max_retries=7
         )
         
-        if not result.get("success"):
-            error_msg = result.get("error", "Search failed")
-            logger.error(f"❌ Search failed: {error_msg}")
-            return f"❌ Search failed: {error_msg}\n\nPlease try rephrasing your query or check your connection."
-        
-        answer = result.get("answer", "")
-        source_docs = result.get("source_documents", [])
-        
-        logger.info(f"✅ Search successful: {len(source_docs)} source documents found")
-        
-        if not answer.strip():
-            return "❌ No relevant information found in the documents for your query.\n\nTry using different keywords or a more general query."
-        
-        # Format detailed response with top 3 source citations
-        response_parts = []
-        
-        # Main answer
-        response_parts.append("📝 **DETAILED RESPONSE:**")
-        response_parts.append("")
-        response_parts.append(answer)
-        response_parts.append("")
-        
-        # Top 3 source citations
-        if source_docs:
-            response_parts.append("📚 **TOP 3 SOURCE CITATIONS:**")
-            response_parts.append("")
+        if result.get("success") and result.get("answer"):
+            answer = result["answer"]
+            source_docs = result.get("source_documents", [])
             
-            for i, doc in enumerate(source_docs[:3], 1):
-                doc_name = doc.get('semantic_identifier', 'Unknown Document')
-                response_parts.append(f"**{i}. {doc_name}**")
-                
-                # Add excerpt if available
-                if doc.get('blurb'):
-                    excerpt = doc['blurb'][:300] + "..." if len(doc['blurb']) > 300 else doc['blurb']
-                    response_parts.append(f"   💬 *\"{excerpt}\"*")
-                
-                response_parts.append("")
+            # Format response with detailed answer and top 3 sources
+            formatted_response = f"**Answer:** {answer}\n\n"
+            
+            if source_docs:
+                formatted_response += "**Top 3 Sources:**\n"
+                for i, doc in enumerate(source_docs[:3], 1):
+                    title = doc.get("document_name", doc.get("title", f"Document {i}"))
+                    content_snippet = doc.get("content", doc.get("snippet", ""))[:200]
+                    if content_snippet:
+                        content_snippet += "..." if len(doc.get("content", doc.get("snippet", ""))) > 200 else ""
+                    formatted_response += f"{i}. **{title}**\n   {content_snippet}\n\n"
+            else:
+                formatted_response += f"**Source:** Document Set {ctx.deps.document_set_id} (CC-pair {ctx.deps.cc_pair_id})\n\n"
+            
+            logger.info("✅ Search completed successfully")
+            return formatted_response.strip()
         else:
-            response_parts.append("📚 **SOURCE CITATIONS:** No specific source documents were returned.")
-        
-        formatted_response = "\n".join(response_parts)
-        logger.info(f"✅ Response formatted with {len(source_docs)} citations")
-        
-        return formatted_response
-        
+            error_msg = result.get("error", "Unknown error")
+            logger.error(f"❌ Search failed: {error_msg}")
+            return "I apologize, but I couldn't find relevant information in the available documents. Please try rephrasing your query or check if the information is available."
+            
     except Exception as e:
-        error_msg = f"❌ Error during search: {e}"
-        logger.error(error_msg)
-        return f"{error_msg}\n\nPlease try again or contact support if the issue persists."
+        logger.error(f"❌ Search failed: {e}")
+        return f"I encountered an error while searching: {str(e)}. Please try again or contact support if the issue persists."
 
 
 async def run_interactive_session():

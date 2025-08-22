@@ -6,6 +6,8 @@ import os
 import logging
 from typing import Dict, Any, List, Optional
 from dataclasses import dataclass
+import asyncio
+from datetime import datetime
 
 from pydantic_ai import Agent, RunContext
 from dotenv import load_dotenv
@@ -43,8 +45,10 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class AgentDependencies:
-    """Dependencies for the agent."""
+    """Dependencies for the hybrid RAG agent."""
     session_id: str
+    onyx_service: Optional[Any] = None  # OnyxService instance for cloud search
+    onyx_document_set_id: Optional[int] = None  # Document set ID for searches
     user_id: Optional[str] = None
     search_preferences: Dict[str, Any] = None
     
@@ -53,7 +57,9 @@ class AgentDependencies:
             self.search_preferences = {
                 "use_vector": True,
                 "use_graph": True,
-                "default_limit": 10
+                "use_onyx": True,
+                "default_limit": 10,
+                "onyx_retries": 7  # Based on our validated configuration
             }
 
 
@@ -344,7 +350,12 @@ async def onyx_search(
         search_type=search_type
     )
     
-    return await onyx_search_tool(input_data)
+    # Use dependency injection for Onyx service and document set
+    return await onyx_search_tool(
+        input_data, 
+        onyx_service=ctx.deps.onyx_service,
+        document_set_id=ctx.deps.onyx_document_set_id
+    )
 
 
 @rag_agent.tool
@@ -375,7 +386,12 @@ async def onyx_answer_with_quote(
         include_quotes=include_quotes
     )
     
-    return await onyx_answer_with_quote_tool(input_data)
+    # Use dependency injection for Onyx service and document set
+    return await onyx_answer_with_quote_tool(
+        input_data,
+        onyx_service=ctx.deps.onyx_service,
+        document_set_id=ctx.deps.onyx_document_set_id
+    )
 
 
 @rag_agent.tool
@@ -416,4 +432,141 @@ async def comprehensive_search(
         search_type=search_type
     )
     
-    return await comprehensive_search_tool(input_data)
+    # Use dependency injection for comprehensive search
+    return await comprehensive_search_tool(
+        input_data,
+        onyx_service=ctx.deps.onyx_service,
+        document_set_id=ctx.deps.onyx_document_set_id
+    )
+
+
+# Helper function to initialize agent with Onyx integration
+async def create_hybrid_agent_dependencies(
+    session_id: str,
+    cc_pair_id: int = 285,  # Use validated CC-pair
+    user_id: Optional[str] = None,
+    enable_onyx: bool = True
+) -> AgentDependencies:
+    """
+    Create AgentDependencies with properly initialized Onyx service.
+    
+    Based on our validated standalone implementation with document set caching
+    and robust error handling. Uses proven CC-pair 285 by default.
+    
+    Args:
+        session_id: Unique session identifier
+        cc_pair_id: CC-pair ID for Onyx document set (default: 285 - validated)
+        user_id: Optional user identifier
+        enable_onyx: Whether to enable Onyx integration
+        
+    Returns:
+        Configured AgentDependencies with Onyx service ready for hybrid RAG
+    """
+    dependencies = AgentDependencies(
+        session_id=session_id,
+        user_id=user_id
+    )
+    
+    if enable_onyx:
+        try:
+            # Import and initialize validated Onyx service
+            from onyx.service import OnyxService
+            onyx_service = OnyxService()
+            logger.info(f"🔄 Initializing Onyx Cloud integration for CC-pair {cc_pair_id}")
+            
+            # Step 1: Test basic connectivity with a simple call
+            try:
+                # Test basic connectivity by checking if we can reach the API
+                personas = onyx_service.get_personas()
+                if not personas:
+                    logger.error(f"❌ Onyx API not accessible - no personas returned")
+                    dependencies.search_preferences["use_onyx"] = False
+                    return dependencies
+                else:
+                    logger.info(f"✅ Onyx API accessible - {len(personas)} personas found")
+            except Exception as e:
+                logger.error(f"❌ Onyx API connectivity test failed: {e}")
+                dependencies.search_preferences["use_onyx"] = False
+                return dependencies
+
+            # Step 2: Verify CC-pair and get/create document set (validated method)
+            try:
+                # Use the working validated method from our standalone implementation
+                document_set_id = onyx_service.create_document_set_validated(
+                    cc_pair_id=cc_pair_id,
+                    name=f"Hybrid_Agent_DocSet_{session_id}",
+                    description=f"Document set for hybrid agent session {session_id}"
+                )
+                
+                if document_set_id:
+                    # Successfully initialized with existing/new document set
+                    dependencies.onyx_service = onyx_service
+                    dependencies.onyx_document_set_id = document_set_id
+                    dependencies.search_preferences["use_onyx"] = True
+                    dependencies.search_preferences["onyx_retries"] = 3  # Reduced for hybrid system
+                    
+                    logger.info(f"✅ Onyx integration initialized successfully")
+                    logger.info(f"   • CC-pair: {cc_pair_id}")
+                    logger.info(f"   • Document set: {document_set_id}")
+                    logger.info(f"   • Status: Ready")
+                else:
+                    logger.warning(f"❌ Failed to create/get document set for CC-pair {cc_pair_id}")
+                    dependencies.search_preferences["use_onyx"] = False
+                    
+            except Exception as e:
+                logger.error(f"❌ Document set creation failed: {e}")
+                dependencies.search_preferences["use_onyx"] = False
+                
+        except Exception as e:
+            logger.error(f"❌ Failed to initialize Onyx service: {e}")
+            dependencies.search_preferences["use_onyx"] = False
+    else:
+        dependencies.search_preferences["use_onyx"] = False
+        logger.info("🔧 Onyx integration disabled by configuration")
+    
+    return dependencies
+
+
+# Convenience function for quick agent setup
+async def create_hybrid_rag_agent(
+    session_id: str = None,
+    cc_pair_id: int = 285,  # Use validated CC-pair by default
+    enable_onyx: bool = True
+) -> tuple[Agent, AgentDependencies]:
+    """
+    Create a fully configured hybrid RAG agent with Onyx + Graphiti integration.
+    
+    Uses validated initialization patterns from our standalone Onyx agent to ensure
+    robust setup with proper fallback to Graphiti-only mode if Onyx fails.
+    
+    Args:
+        session_id: Session identifier (auto-generated if None)
+        cc_pair_id: CC-pair for Onyx integration (default: 285 - validated)
+        enable_onyx: Whether to enable Onyx integration
+    
+    Returns:
+        Tuple of (Agent instance, configured dependencies)
+    """
+    if session_id is None:
+        session_id = f"hybrid_session_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    
+    logger.info(f"🚀 Creating hybrid RAG agent for session: {session_id}")
+    
+    dependencies = await create_hybrid_agent_dependencies(
+        session_id=session_id,
+        cc_pair_id=cc_pair_id,
+        enable_onyx=enable_onyx
+    )
+    
+    # Log final configuration
+    systems_enabled = []
+    if dependencies.search_preferences.get("use_onyx"):
+        systems_enabled.append("Onyx Cloud")
+    if dependencies.search_preferences.get("use_vector"):
+        systems_enabled.append("Vector DB") 
+    if dependencies.search_preferences.get("use_graph"):
+        systems_enabled.append("Knowledge Graph")
+        
+    logger.info(f"🎯 Hybrid agent ready with: {', '.join(systems_enabled)}")
+    
+    return rag_agent, dependencies
