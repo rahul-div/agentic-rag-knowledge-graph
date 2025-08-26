@@ -1,429 +1,690 @@
-# Multi-Client Project Intelligence System
+# 🤖 Hybrid Agentic RAG Knowledge Graph System
 
-**🚀 Now optimized for Google Gemini API!** This hybrid RAG system has been migrated from OpenAI to use Google Gemini for all LLM and embedding tasks, providing cost-effective and high-quality AI capabilities.
+A comprehensive **hybrid RAG system** that intelligently combines **Onyx Cloud enterprise search**, **Graphiti vector similarity search**, and **Graphiti knowledge graph search** into a unified intelligent agent platform. This system provides deep insights and relationship analysis across multiple data sources with automatic tool selection and fallback mechanisms.
 
-**Multi-Client Project Intelligence Platform** that combines traditional RAG (vector search) with temporal knowledge graph capabilities to provide deep insights and relationship analysis for client projects. This system serves as a secondary research tool, enabling teams to quickly understand complex project contexts, stakeholder relationships, and historical decisions across multiple concurrent client engagements.
+## 🚀 **System Architecture Overview**
 
-## 🎯 **Primary Use Case: Client Project Intelligence**
+This hybrid system seamlessly integrates three powerful search technologies:
 
-This system is designed for **consulting/services companies** managing multiple client projects simultaneously:
+- **🔍 Onyx Cloud**: Enterprise-grade document search with advanced semantic understanding and citation capabilities
+- **🧠 Graphiti Vector**: High-performance semantic similarity search using Google Gemini embeddings (768 dimensions)
+- **🕸️ Graphiti Knowledge Graph**: Temporal relationship discovery and entity analysis powered by Neo4j
+- **🤖 Intelligent Agent**: Pydantic AI agent that automatically selects optimal tools and provides fallback resilience
 
-- **Project-Specific Knowledge Isolation:** Each client project has its dedicated hybrid RAG instance
-- **Team Collaboration:** Multiple team members access project-specific insights with role-based permissions  
-- **Rapid Context Acquisition:** New team members get up to speed 70% faster through intelligent querying
-- **Deep Relationship Discovery:** Uncover hidden connections between stakeholders, requirements, and decisions
-- **Historical Intelligence:** Preserve and leverage institutional knowledge across project lifecycles
+### **Key Features:**
+- **🎯 Intelligent Tool Selection**: Agent automatically chooses the best search strategy for each query
+- **🔄 Comprehensive Fallback Logic**: Graceful degradation when individual systems are unavailable  
+- **⚡ Real-time Streaming**: Live response generation with full tool usage transparency
+- **📊 Multi-System Synthesis**: Combines results from all available systems for comprehensive answers
+- **🛡️ Enterprise Ready**: Robust error handling, retry logic, and production-grade logging
 
-### **Target Users:**
-- **Project Managers** - Understanding dependencies, risks, and stakeholder concerns
-- **Business Analysts** - Identifying patterns and insights from complex project documentation  
-- **Consultants** - Quick context acquisition for client engagements
-- **New Team Members** - Rapid onboarding with comprehensive project understanding
-- **Technical Teams** - Understanding system architectures and technical decision rationale
+## 🔧 Quick Start (Recommended)
 
-## 🔧 Quick Setup (Gemini Edition)
+### Option 1: Automated Scripts (Fastest)
 
-1. **Get your Gemini API key**: Visit [Google AI Studio](https://aistudio.google.com/) and create an API key
-2. **Run the setup script**: `python3 setup_api_keys.py` (interactive setup)
-3. **Or manually edit `.env`**: Replace placeholder values with your real API key
-4. **Start ingestion**: `python3 ingestion/ingest.py`
-5. **Check status**: `python3 quick_start.py`
-
-## 🎯 Gemini Integration Features
-
-- **Cost-effective**: Gemini offers generous free tier (15 RPM, 1M tokens/day)
-- **High-quality embeddings**: Using `embedding-001` model (768 dimensions)
-- **Optimized chunking**: Chunk sizes optimized for Gemini's context window
-- **Enhanced entity extraction**: Includes Gemini-specific terms and patterns
-- **Comprehensive error handling**: Detailed logging and validation
-
-Built with:
-
-- **Google Gemini** for LLM and Embeddings (NEW!)
-- Pydantic AI for the AI Agent Framework
-- Graphiti for the Knowledge Graph
-- Postgres with PGVector for the Vector Database
-- Neo4j for the Knowledge Graph Engine (Graphiti connects to this)
-- FastAPI for the Agent API
-- Claude Code for the AI Coding Assistant (See `CLAUDE.md`, `PLANNING.md`, and `TASK.md`)
-
-## Overview
-
-This system includes three main components:
-
-1. **Document Ingestion Pipeline**: Processes markdown documents using semantic chunking and builds both vector embeddings and knowledge graph relationships
-2. **AI Agent Interface**: A conversational agent powered by Pydantic AI that can search across both vector database and knowledge graph
-3. **Streaming API**: FastAPI backend with real-time streaming responses and comprehensive search capabilities
-
-## Prerequisites
-
-- Python 3.11 or higher
-- PostgreSQL database (such as Neon)
-- Neo4j database (for knowledge graph)
-- LLM Provider API key (OpenAI, Ollama, Gemini, etc.)
-
-## Installation
-
-### 1. Set up a virtual environment
-
+**Terminal 1 - Start API Server:**
 ```bash
-# Create and activate virtual environment
-python -m venv venv       # python3 on Linux
-source venv/bin/activate  # On Linux/macOS
-# or
-venv\Scripts\activate     # On Windows
+cd /Users/rahul/Desktop/Graphiti/agentic-rag-knowledge-graph
+./start_api.sh
 ```
 
-### 2. Install dependencies
-
+**Terminal 2 - Start CLI Client:**
 ```bash
-pip install -r requirements.txt
+cd /Users/rahul/Desktop/Graphiti/agentic-rag-knowledge-graph
+./start_cli.sh
 ```
 
-### 3. Set up required tables in Postgres
+### Option 2: Manual Setup
 
-Execute the SQL in `sql/schema.sql` to create all necessary tables, indexes, and functions.
-
-Be sure to change the embedding dimensions on lines 31, 67, and 100 based on your embedding model. OpenAI's text-embedding-3-small is 1536 and nomic-embed-text from Ollama is 768 dimensions, for reference.
-
-Note that this script will drop all tables before creating/recreating!
-
-### 4. Set up Neo4j
-
-You have a couple easy options for setting up Neo4j:
-
-#### Option A: Using Local-AI-Packaged (Simplified setup - Recommended)
-1. Clone the repository: `git clone https://github.com/coleam00/local-ai-packaged`
-2. Follow the installation instructions to set up Neo4j through the package
-3. Note the username and password you set in .env and the URI will be bolt://localhost:7687
-
-#### Option B: Using Neo4j Desktop
-1. Download and install [Neo4j Desktop](https://neo4j.com/download/)
-2. Create a new project and add a local DBMS
-3. Start the DBMS and set a password
-4. Note the connection details (URI, username, password)
-
-### 5. Configure environment variables
-
-Create a `.env` file in the project root:
-
+**Terminal 1 - API Server:**
 ```bash
-# Database Configuration (example Neon connection string)
-DATABASE_URL=postgresql://username:password@ep-example-12345.us-east-2.aws.neon.tech/neondb
+cd /Users/rahul/Desktop/Graphiti/agentic-rag-knowledge-graph
+source .venv/bin/activate  # or venv/bin/activate
+python comprehensive_agent_api.py
+```
 
-# Neo4j Configuration  
+**Terminal 2 - CLI Client:**
+```bash
+cd /Users/rahul/Desktop/Graphiti/agentic-rag-knowledge-graph
+source .venv/bin/activate  # or venv/bin/activate
+python comprehensive_agent_cli.py
+```
+
+## 🎯 Technology Stack
+
+- **🤖 Pydantic AI** - Agent framework with tool orchestration
+- **⚡ FastAPI** - High-performance API backend with streaming support
+- **🔍 Onyx Cloud** - Enterprise document search and retrieval
+- **🧠 Google Gemini** - LLM and embedding generation (cost-effective, high-quality)
+- **🕸️ Graphiti** - Knowledge graph and vector search capabilities
+- **🗄️ PostgreSQL + pgvector** - Vector database for similarity search
+- **📊 Neo4j** - Graph database for relationship discovery
+- **🖥️ Rich Terminal UI** - Beautiful CLI with real-time progress and colored output
+
+## 📋 Prerequisites
+
+### System Requirements
+- **Python 3.11+** (Pydantic AI compatibility)
+- **PostgreSQL** with pgvector extension
+- **Neo4j** database (local or cloud)
+- **Port 8058** available for FastAPI server
+
+### Required API Keys
+- **Google Gemini API Key** ([Get it here](https://aistudio.google.com/))
+- **Onyx Cloud API Key** (for enterprise document search)
+
+### Virtual Environment
+```bash
+# Ensure you have a virtual environment set up
+python -m venv .venv
+source .venv/bin/activate  # Linux/macOS
+# or .venv\Scripts\activate  # Windows
+pip install -r requirements_final.txt
+```
+
+## ⚙️ Configuration
+
+### Environment Variables
+
+Create a `.env` file in the project root with the following configuration:
+
+```env
+# Google Gemini Configuration (Required)
+GOOGLE_API_KEY=your_gemini_api_key_here
+LLM_PROVIDER=gemini
+LLM_CHOICE=gemini-2.0-flash-thinking-exp-1219
+EMBEDDING_MODEL=embedding-001
+
+# Onyx Cloud Configuration (Required for enterprise search)
+ONYX_API_KEY=your_onyx_api_key_here
+ONYX_BASE_URL=https://cloud.onyx.app
+
+# Database Configuration
+DATABASE_URL=postgresql://user:password@host:port/database
 NEO4J_URI=bolt://localhost:7687
-NEO4J_USER=neo4j
-NEO4J_PASSWORD=your_password
-
-# LLM Provider Configuration (choose one)
-LLM_PROVIDER=openai
-LLM_BASE_URL=https://api.openai.com/v1
-LLM_API_KEY=sk-your-api-key
-LLM_CHOICE=gpt-4.1-mini
-
-# Embedding Configuration
-EMBEDDING_PROVIDER=openai
-EMBEDDING_BASE_URL=https://api.openai.com/v1
-EMBEDDING_API_KEY=sk-your-api-key
-EMBEDDING_MODEL=text-embedding-3-small
-
-# Ingestion Configuration
-INGESTION_LLM_CHOICE=gpt-4.1-nano  # Faster model for processing
+NEO4J_USERNAME=neo4j
+NEO4J_PASSWORD=your_neo4j_password
 
 # Application Configuration
 APP_ENV=development
-LOG_LEVEL=INFO
 APP_PORT=8058
+LOG_LEVEL=INFO
 ```
 
-For other LLM providers:
-```bash
+### Alternative LLM Providers (Optional)
+
+```env
+# OpenAI
+LLM_PROVIDER=openai
+LLM_API_KEY=sk-your-openai-key
+LLM_CHOICE=gpt-4o-mini
+
 # Ollama (Local)
 LLM_PROVIDER=ollama
 LLM_BASE_URL=http://localhost:11434/v1
-LLM_API_KEY=ollama
 LLM_CHOICE=qwen2.5:14b-instruct
 
 # OpenRouter
 LLM_PROVIDER=openrouter
 LLM_BASE_URL=https://openrouter.ai/api/v1
-LLM_API_KEY=your-openrouter-key
 LLM_CHOICE=anthropic/claude-3-5-sonnet
-
-# Gemini
-LLM_PROVIDER=gemini
-LLM_BASE_URL=https://generativelanguage.googleapis.com/v1beta
-LLM_API_KEY=your-gemini-key
-LLM_CHOICE=gemini-2.5-flash
 ```
 
-## Quick Start
+## 🗄️ Database Setup
 
-### 1. Prepare Your Project Documents
+### PostgreSQL with pgvector
 
-Add your client project documents to the `documents/` folder:
+```bash
+# Install pgvector extension
+# Execute sql/schema.sql to create tables
+psql -d "$DATABASE_URL" -f sql/schema.sql
+```
+
+**Important**: The schema script sets embedding dimensions to **768** for Gemini's `embedding-001` model. If using other embedding models, update the dimensions in the schema file.
+
+### Neo4j Setup
+
+#### Option A: Local Neo4j Desktop (Recommended)
+
+1. Download [Neo4j Desktop](https://neo4j.com/download/)
+2. Create a new project and local DBMS
+3. Set password and start the database
+4. Note connection details for `.env` configuration
+
+#### Option B: Neo4j Cloud (AuraDB)
+
+1. Create account at [Neo4j Aura](https://neo4j.com/cloud/aura/)
+2. Create a free AuraDB instance
+3. Download connection credentials
+4. Update `.env` with cloud connection details
+
+## 📄 Document Ingestion Pipeline
+
+### Prepare Your Documents
+
+Add your documents to the `documents/` folder:
 
 ```bash
 mkdir -p documents
-# Add your project documentation files
-# Example: documents/project_requirements.md
-#          documents/stakeholder_analysis.md
-#          documents/technical_decisions.md
-#          documents/meeting_notes.md
+# Add your documentation files
+# Supported formats: .md, .txt files
 ```
 
-**Typical Project Documents Include:**
-- Requirements documents and specifications
-- Stakeholder analysis and communication logs  
+**Document Types That Work Best:**
+- Project requirements and specifications
 - Meeting notes and decision records
 - Technical architecture documents
+- Stakeholder analysis and communication logs
 - Status reports and project updates
 - Risk assessments and mitigation plans
-- Change requests and scope modifications
 
-**Note**: The system will extract entities like projects, stakeholders, requirements, and decisions, then build relationships between them for intelligent querying.
-
-### 2. Run Document Ingestion
+### Run Document Ingestion
 
 **Important**: You must run ingestion first to populate the databases before the agent can provide meaningful responses.
 
 ```bash
-# Basic ingestion with semantic chunking
+# Standard ingestion with Graphiti knowledge graph
 python -m ingestion.ingest
 
-# Clean existing data and re-ingest everything
+# Clean existing data and re-ingest
 python -m ingestion.ingest --clean
 
-# Custom settings for faster processing (no knowledge graph)
-python -m ingestion.ingest --chunk-size 800 --no-semantic --verbose
+# Faster processing without knowledge graph
+python -m ingestion.ingest --no-semantic --verbose
 ```
 
 The ingestion process will:
-- Parse and semantically chunk your project documents
-- Generate embeddings for vector search
-- Extract project entities (stakeholders, requirements, decisions, deliverables)
-- Build relationship graphs between project components
-- Store everything in PostgreSQL and Neo4j
+- Parse and semantically chunk your documents using Google Gemini
+- Generate embeddings for vector search (768-dimensional)
+- Extract entities and relationships for knowledge graph
+- Store everything in PostgreSQL and Neo4j databases
 
-NOTE that this can take a while because knowledge graphs are very computationally expensive!
+**Note**: Knowledge graph creation can be computationally intensive and may take considerable time for large document sets.
 
-### 3. Configure Agent Behavior (Optional)
+## 🤖 Intelligent Agent System
 
-Before running the API server, you can customize when the agent uses different tools by modifying the system prompt in `agent/prompts.py`. The system prompt controls:
-- When to use vector search vs knowledge graph search
-- How to combine results from different sources
-- The agent's reasoning strategy for tool selection
+### Core Agent Features
 
-### 4. Start the API Server (Terminal 1)
+The hybrid agent (`agent/agent.py`) includes 10 specialized tools:
 
-```bash
-# Start the FastAPI server
-python -m agent.api
+#### **Onyx Cloud Tools** (Enterprise Search)
+1. **`onyx_search`** - Advanced document search with relevance scoring
+2. **`onyx_answer_with_quote`** - QA with citations and supporting quotes
 
-# Server will be available at http://localhost:8058
+#### **Graphiti Tools** (Vector & Knowledge Graph)
+3. **`vector_search`** - Semantic similarity search across document chunks
+4. **`graph_search`** - Knowledge graph queries for facts and relationships
+5. **`hybrid_search`** - Combined vector and keyword search
+6. **`get_document`** - Retrieve complete document content
+7. **`list_documents`** - Browse available documents with metadata
+8. **`get_entity_relationships`** - Explore entity connections in knowledge graph
+9. **`get_entity_timeline`** - Timeline analysis for specific entities
+10. **`comprehensive_search`** - Multi-system search with intelligent synthesis
+
+### Tool Selection Intelligence
+
+The agent automatically selects optimal tools based on query characteristics:
+
+- **Simple factual queries** → `graph_search` for precise facts
+- **Document similarity** → `vector_search` for semantic matching
+- **Complex analysis** → `comprehensive_search` for multi-system results
+- **Enterprise documents** → `onyx_search` for advanced document retrieval
+- **Cited answers** → `onyx_answer_with_quote` for authoritative responses with sources
+
+### Fallback and Resilience
+
+The system includes robust fallback mechanisms:
+
+```
+Query → Agent Decision
+├── Onyx Available? → Try Onyx tools first
+│   ├── Success → Continue with Graphiti for synthesis
+│   └── Failure → Fallback to Graphiti tools only
+└── Graphiti Available? → Use vector + graph search
+    ├── Vector Success + Graph Success → Multi-system synthesis
+    ├── Vector Success + Graph Failure → Vector-only results
+    └── Vector Failure + Graph Success → Graph-only results
 ```
 
-### 5. Use the Command Line Interface (Terminal 2)
+## 🎮 Usage & Examples
 
-The CLI provides an interactive way to chat with the agent and see which tools it uses for each query.
+### Interactive CLI Experience
+
+The CLI provides the best development experience with real-time feedback:
 
 ```bash
-# Start the CLI in a separate terminal from the API (connects to default API at http://localhost:8058)
-python cli.py
-
-# Connect to a different URL
-python cli.py --url http://localhost:8058
-
-# Connect to a specific port
-python cli.py --port 8080
+# Start CLI (after API server is running)
+python comprehensive_agent_cli.py
 ```
 
 #### CLI Features
 
-- **Real-time streaming responses** - See the agent's response as it's generated
-- **Tool usage visibility** - Understand which tools the agent used:
-  - `vector_search` - Semantic similarity search
-  - `graph_search` - Knowledge graph queries
-  - `hybrid_search` - Combined search approach
-- **Session management** - Maintains conversation context
-- **Color-coded output** - Easy to read responses and tool information
-
-#### Example CLI Session
-
-```
-🤖 Agentic RAG with Knowledge Graph CLI
-============================================================
-Connected to: http://localhost:8058
-
-You: What are the key dependencies for the Q2 delivery milestone?
-
-🤖 Assistant:
-Based on the project documentation, the Q2 delivery milestone has several critical dependencies...
-
-🛠 Tools Used:
-  1. vector_search (query='Q2 delivery dependencies', limit=10)
-  2. graph_search (query='milestone dependencies requirements')
-
-────────────────────────────────────────────────────────────
-
-You: Which stakeholders have raised concerns about the authentication module?
-
-🤖 Assistant:
-Several stakeholders have expressed concerns about the authentication module...
-
-🛠 Tools Used:
-  1. hybrid_search (query='authentication stakeholder concerns', limit=10)
-  2. get_entity_relationships (entity='Authentication Module')
-```
+- **🔄 Real-time streaming**: Watch the agent's response generate in real-time
+- **🛠️ Tool transparency**: See exactly which tools the agent uses for each query
+- **📊 System status**: Monitor health of all integrated systems
+- **💬 Session management**: Conversation continuity across interactions
+- **🎨 Rich terminal UI**: Color-coded output and formatted responses
 
 #### CLI Commands
 
-- `help` - Show available commands
-- `health` - Check API connection status
-- `clear` - Clear current session
-- `exit` or `quit` - Exit the CLI
+```text
+/help     - Show all available commands and usage
+/health   - Check connectivity to all systems (Onyx + Graphiti)
+/status   - Show current session and system information
+/clear    - Clear conversation history
+/quit     - Exit the CLI gracefully
+```
 
-### 6. Test the System
+#### Example CLI Session
 
-#### Health Check
+```text
+🤖 Hybrid RAG Agent CLI
+============================================================
+Connected to API: http://localhost:8058
+
+You: What are the main technical modules in our financial system?
+
+🤖 Assistant:
+Based on comprehensive search across all systems, the financial system consists of several key technical modules...
+
+🛠️ Tools Used: 4
+  1. onyx_search - Found 31 enterprise documents
+  2. vector_search - Retrieved 5 semantically similar chunks  
+  3. graph_search - Discovered entity relationships
+  4. comprehensive_search - Multi-system synthesis
+
+📊 Response generated in 12.4s using Onyx + Graphiti synthesis
+────────────────────────────────────────────────────────────
+
+You: Show me the timeline of authentication decisions
+
+🤖 Assistant:
+Here's the chronological timeline of authentication-related decisions...
+
+🛠️ Tools Used: 2
+  1. get_entity_timeline - Temporal analysis for "authentication"
+  2. get_entity_relationships - Related system dependencies
+
+📊 Response generated in 3.2s using Knowledge Graph only
+────────────────────────────────────────────────────────────
+```
+
+### Common Query Patterns
+
+The system excels at different types of queries:
+
+**📋 Document Discovery**
+```text
+"What documents are available about user authentication?"
+→ Uses: list_documents, vector_search
+```
+
+**🔍 Factual Questions**
+```text
+"What is the status of the payment gateway integration?"
+→ Uses: onyx_search, graph_search for comprehensive facts
+```
+
+**🕸️ Relationship Analysis**
+```text
+"How do the authentication and authorization modules interact?"
+→ Uses: get_entity_relationships, comprehensive_search
+```
+
+**📈 Temporal Analysis**
+```text
+"Show me how the security requirements evolved over time"
+→ Uses: get_entity_timeline, onyx_answer_with_quote
+```
+
+**🎯 Comprehensive Research**
+```text
+"Give me a complete analysis of the financial reporting system"
+→ Uses: comprehensive_search (all tools in intelligent sequence)
+```
+
+## 🌐 API Documentation
+
+### Health Check
+
 ```bash
 curl http://localhost:8058/health
 ```
 
-#### Chat with the Agent (Non-streaming)
+**Response:**
+```json
+{
+  "status": "healthy",
+  "systems": {
+    "database": "connected",
+    "neo4j": "connected", 
+    "onyx": "connected",
+    "gemini": "connected"
+  }
+}
+```
+
+### Chat Endpoint (Non-streaming)
+
 ```bash
 curl -X POST "http://localhost:8058/chat" \
   -H "Content-Type: application/json" \
   -d '{
-    "message": "What are the main risks identified for this project?"
+    "message": "What are the key technical dependencies?",
+    "session_id": "my_session_123"
   }'
 ```
 
-#### Streaming Chat
+### Streaming Chat (Recommended)
+
 ```bash
 curl -X POST "http://localhost:8058/chat/stream" \
   -H "Content-Type: application/json" \
   -d '{
-    "message": "Show me the timeline of major technical decisions made",
+    "message": "Analyze the system architecture decisions",
+    "session_id": "my_session_123"
   }'
 ```
 
-## How It Works
+**Interactive API Documentation**: Visit `http://localhost:8058/docs` when the server is running.
 
-### The Power of Hybrid RAG + Knowledge Graph for Project Intelligence
+## 🏗️ System Architecture Deep Dive
 
-This system combines the best of both worlds for comprehensive project understanding:
+### How the Hybrid RAG System Works
 
-**Vector Database (PostgreSQL + pgvector)**:
-- Semantic similarity search across project document chunks
-- Fast retrieval of contextually relevant project information
-- Excellent for finding similar requirements, decisions, or issues
+This system represents a **next-generation RAG architecture** that combines the best of multiple search paradigms:
 
-**Knowledge Graph (Neo4j + Graphiti)**:
-- Temporal relationships between project entities (stakeholders, requirements, decisions)
-- Graph traversal for discovering hidden project dependencies
-- Perfect for understanding stakeholder influence, requirement evolution, and decision impacts
+#### **1. Onyx Cloud Integration (Enterprise Layer)**
+- **Advanced Document Search**: Sophisticated semantic understanding with enterprise-grade relevance scoring
+- **Citation-Based QA**: Generates authoritative answers with proper source citations
+- **Document Set Management**: Organized document collections with metadata and access control
+- **Fallback Resilience**: Graceful degradation when cloud services are unavailable
 
-**Intelligent Agent**:
-- Automatically chooses the best search strategy for project queries
-- Combines results from both databases for comprehensive answers
-- Provides context-aware responses with source citations from project documents
+#### **2. Graphiti Vector Database (Semantic Layer)**  
+- **High-Performance Similarity Search**: 768-dimensional Google Gemini embeddings with pgvector optimization
+- **Semantic Chunking**: Intelligent document splitting using LLM analysis for optimal context preservation
+- **Fast Retrieval**: Sub-second search across large document collections
+- **Contextual Relevance**: Returns semantically related content regardless of keyword matching
 
-### Example Project Queries
+#### **3. Graphiti Knowledge Graph (Relationship Layer)**
+- **Temporal Entity Tracking**: Understands how information and relationships evolve over time
+- **Graph Traversal**: Discovers hidden connections between entities, concepts, and decisions
+- **Relationship Discovery**: Maps complex interdependencies between system components
+- **Timeline Analysis**: Tracks the evolution of requirements, decisions, and system changes
 
-The system excels at project queries that benefit from both semantic search and relationship understanding:
+#### **4. Intelligent Agent Orchestration (Decision Layer)**
+- **Automatic Tool Selection**: Chooses optimal search strategy based on query characteristics and system availability
+- **Multi-System Synthesis**: Combines results from all available systems for comprehensive responses
+- **Fallback Chains**: Maintains service availability even when individual components fail
+- **Response Optimization**: Balances speed, accuracy, and comprehensiveness based on query complexity
 
-**Stakeholder Analysis**: "Which stakeholders have decision-making authority on the payment module?" 
-  - Uses vector search to find relevant stakeholder documents and graph search to understand influence relationships
+### Why This Architecture is Powerful
 
-**Requirement Dependencies**: "What requirements are blocking the user authentication feature?"
-  - Uses knowledge graph to traverse requirement dependencies and find blocking relationships
+1. **🎯 Complementary Strengths**: Each system excels at different types of queries
+   - **Onyx**: Best for enterprise document search and authoritative answers
+   - **Vector Search**: Excellent for semantic similarity and fuzzy matching  
+   - **Knowledge Graph**: Perfect for relationship discovery and temporal analysis
 
-**Decision History**: "Show me the timeline of technical architecture decisions"
-  - Leverages Graphiti's temporal capabilities to track decision evolution over time
+2. **🔄 Intelligent Orchestration**: The agent automatically chooses the best approach
+   - Simple facts → Knowledge graph for precision
+   - Document similarity → Vector search for semantic matching
+   - Complex analysis → Multi-system comprehensive search
+   - Enterprise queries → Onyx cloud for advanced capabilities
 
-**Risk Assessment**: "What are the interconnected risks for the Q3 delivery milestone?"
-  - Combines vector search for risk documentation with graph traversal for dependency analysis
+3. **🛡️ Resilient Design**: System remains functional even with partial failures
+   - Onyx unavailable → Falls back to Graphiti systems
+   - Vector search fails → Uses knowledge graph only
+   - Knowledge graph unavailable → Relies on vector similarity
 
-### Why This Architecture Works So Well for Project Management
+4. **📈 Scalable Performance**: Each component optimized for its strengths
+   - Onyx handles enterprise-scale document collections
+   - PostgreSQL + pgvector provides fast similarity search
+   - Neo4j enables complex graph traversals
+   - Pydantic AI manages intelligent tool coordination
 
-1. **Complementary Strengths**: Vector search finds semantically similar project content while knowledge graphs reveal hidden project dependencies
-
-2. **Temporal Intelligence**: Graphiti tracks how project decisions and requirements evolve over time, perfect for understanding project history
-
-3. **Multi-Client Architecture**: Each client project operates in isolation while sharing the same powerful intelligence framework
-
-4. **Team Collaboration**: Multiple team members can query the same project knowledge base with role-appropriate access
-
-## API Documentation
-
-Visit http://localhost:8058/docs for interactive API documentation once the server is running.
-
-## Key Features
-
-- **Hybrid Search**: Seamlessly combines vector similarity and graph traversal
-- **Temporal Knowledge**: Tracks how information changes over time
-- **Streaming Responses**: Real-time AI responses with Server-Sent Events
-- **Flexible Providers**: Support for multiple LLM and embedding providers
-- **Semantic Chunking**: Intelligent document splitting using LLM analysis
-- **Production Ready**: Comprehensive testing, logging, and error handling
-
-## Project Structure
+## 📁 Project Structure
 
 ```
 agentic-rag-knowledge-graph/
-├── agent/                  # AI agent and API
-│   ├── agent.py           # Main Pydantic AI agent
-│   ├── api.py             # FastAPI application
-│   ├── providers.py       # LLM provider abstraction
-│   └── models.py          # Data models
-├── ingestion/             # Document processing
-│   ├── ingest.py         # Main ingestion pipeline
-│   ├── chunker.py        # Semantic chunking
-│   └── embedder.py       # Embedding generation
-├── sql/                   # Database schema
-├── documents/             # Your markdown files
-└── tests/                # Comprehensive test suite
+├── 🤖 Agent System
+│   ├── comprehensive_agent_api.py     # FastAPI backend server
+│   ├── comprehensive_agent_cli.py     # Interactive CLI client  
+│   ├── agent/
+│   │   ├── agent.py                   # Main Pydantic AI agent
+│   │   ├── tools.py                   # 10 specialized search tools
+│   │   ├── prompts.py                 # System prompts and instructions
+│   │   ├── providers.py               # LLM provider abstraction
+│   │   ├── models.py                  # Pydantic data models
+│   │   ├── db_utils.py                # Vector database utilities
+│   │   └── graph_utils.py             # Knowledge graph utilities
+│
+├── 🔍 Onyx Integration
+│   ├── onyx/
+│   │   ├── service.py                 # Onyx Cloud API client
+│   │   ├── interface.py               # Service interface definition
+│   │   └── config.py                  # Configuration management
+│
+├── 📄 Document Processing
+│   ├── ingestion/
+│   │   ├── ingest.py                  # Main ingestion pipeline
+│   │   ├── chunker.py                 # Semantic document chunking
+│   │   ├── embedder.py                # Google Gemini embeddings
+│   │   └── graph_builder.py           # Knowledge graph construction
+│
+├── 🗄️ Database & Configuration
+│   ├── sql/schema.sql                 # PostgreSQL + pgvector schema
+│   ├── documents/                     # Your input documents
+│   ├── requirements_final.txt         # Python dependencies
+│   ├── .env                          # Environment configuration
+│   ├── start_api.sh                  # Automated API startup
+│   └── start_cli.sh                  # Automated CLI startup
+│
+└── 📚 Documentation
+    ├── README.md                      # This comprehensive guide
+    ├── SETUP_AND_RUN_GUIDE.md        # Detailed setup instructions
+    ├── FINAL_LAUNCH_INSTRUCTIONS.md  # Quick launch guide
+    └── Implementation/                # Technical implementation docs
 ```
 
-## Running Tests
+## 🧪 Testing & Development
+
+### Health Monitoring
+
+The system provides comprehensive health monitoring:
 
 ```bash
-# Run all tests
-pytest
+# Check all systems
+curl http://localhost:8058/health
 
-# Run with coverage
-pytest --cov=agent --cov=ingestion --cov-report=html
-
-# Run specific test categories
-pytest tests/agent/
-pytest tests/ingestion/
+# CLI health command
+/health
 ```
 
-## Troubleshooting
+**Health Check Response:**
+```json
+{
+  "status": "healthy",
+  "timestamp": "2025-08-26T10:30:00Z",
+  "systems": {
+    "database": {"status": "connected", "latency_ms": 12},
+    "neo4j": {"status": "connected", "nodes": 1247, "relationships": 892},
+    "onyx": {"status": "connected", "document_sets": 3},
+    "gemini": {"status": "connected", "model": "gemini-2.0-flash-thinking-exp-1219"}
+  },
+  "agent": {
+    "tools_available": 10,
+    "fallback_ready": true
+  }
+}
+```
 
-### Common Issues
+### Development Features
 
-**Database Connection**: Ensure your DATABASE_URL is correct and the database is accessible
+- **📊 Comprehensive Logging**: Detailed logs for debugging and monitoring
+- **🔄 Hot Reloading**: FastAPI auto-reloads on code changes
+- **🛠️ Tool Introspection**: See exactly which tools the agent uses and why
+- **📈 Performance Metrics**: Response times, tool usage, and system performance
+- **🚨 Error Handling**: Graceful error recovery with detailed error reporting
+
+## 🚨 Troubleshooting
+
+### Common Setup Issues
+
+#### **Virtual Environment Problems**
 ```bash
-# Test your connection
+# Recreate virtual environment if corrupted
+rm -rf .venv
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements_final.txt
+```
+
+#### **Port Conflicts (8058 in use)**
+```bash
+# Check what's using port 8058
+lsof -i :8058
+
+# Kill the process if needed
+kill -9 [PID]
+
+# Or change port in .env
+APP_PORT=8059
+```
+
+#### **Database Connection Issues**
+```bash
+# Test PostgreSQL connection
 psql -d "$DATABASE_URL" -c "SELECT 1;"
-```
 
-**Neo4j Connection**: Verify your Neo4j instance is running and credentials are correct
-```bash
-# Check if Neo4j is accessible (adjust URL as needed)
+# Test Neo4j connection (adjust credentials)
 curl -u neo4j:password http://localhost:7474/db/data/
 ```
 
-**No Results from Agent**: Make sure you've run the ingestion pipeline first
+#### **API Key Issues**
+- **Google Gemini**: Verify key at [Google AI Studio](https://aistudio.google.com/)
+- **Onyx Cloud**: Check key validity in Onyx admin console
+- **Rate Limits**: Gemini free tier: 15 RPM, 1M tokens/day
+
+### System Health Diagnostics
+
+#### **Check All Systems**
 ```bash
-python -m ingestion.ingest --verbose
+# CLI health command (when connected)
+/health
+
+# Direct API health check
+curl http://localhost:8058/health
 ```
 
-**LLM API Issues**: Check your API key and provider configuration in `.env`
+#### **Component-Specific Issues**
+
+**Onyx Cloud Unavailable:**
+- System automatically falls back to Graphiti-only mode
+- Agent will use `vector_search` + `graph_search` tools
+- Check Onyx API key and network connectivity
+
+**Vector Search Fails:**
+- Verify PostgreSQL connection and pgvector extension
+- Check embedding model configuration
+- Ensure documents have been ingested
+
+**Knowledge Graph Issues:**
+- Verify Neo4j service is running
+- Check database credentials in `.env`
+- Confirm knowledge graph was built during ingestion
+
+**No Results from Agent:**
+- Ensure document ingestion completed successfully
+- Check if documents exist in `documents/` folder
+- Verify both databases contain data
+
+### Performance Optimization
+
+#### **For Large Document Sets**
+```bash
+# Use faster ingestion (no knowledge graph)
+python -m ingestion.ingest --no-semantic --verbose
+
+# Or optimize chunk size
+python -m ingestion.ingest --chunk-size 1000
+```
+
+#### **For Limited API Quotas**
+- **Gemini Free Tier**: 15 requests/minute, 1M tokens/day
+- **Rate Limiting**: Agent automatically handles rate limits
+- **Cost Control**: Use smaller chunk sizes and limit document scope
+
+### Logs and Debugging
+
+#### **Main Log Files**
+- **API Server**: `comprehensive_agent_api.log`
+- **Console Output**: Real-time in terminal
+- **Component Logs**: Individual module logging
+
+#### **Enable Debug Logging**
+```env
+# Add to .env for detailed debugging
+LOG_LEVEL=DEBUG
+APP_ENV=development
+```
+
+#### **Common Error Patterns**
+
+**"Tools used: 4" with Onyx failures:**
+- Normal behavior: Agent tries multiple Onyx tools, falls back to Graphiti
+- System working correctly with resilient fallback
+
+**"No answer on attempt 1/2/3":**
+- Onyx service may be slow or unavailable
+- Agent will automatically fallback to other tools
+
+**"Unexpected error in answer with quote":**
+- Onyx API response format issue
+- Agent falls back to alternative search methods
+
+## 🎯 Best Practices
+
+### Document Preparation
+- **Format**: Use markdown (.md) or plain text (.txt) files
+- **Structure**: Clear headings and sections improve extraction
+- **Size**: Aim for 1-10 MB per document for optimal processing
+- **Quality**: Well-structured documents produce better knowledge graphs
+
+### Query Optimization
+- **Specific Questions**: "What are the authentication requirements?" vs "Tell me about auth"
+- **Entity Names**: Use proper names of people, systems, or concepts
+- **Temporal Queries**: Include time references for timeline analysis
+- **Comprehensive Research**: Ask for "complete analysis" to trigger multi-system search
+
+### System Monitoring
+- **Regular Health Checks**: Use `/health` command to monitor all systems
+- **Performance Tracking**: Monitor response times and tool usage patterns
+- **Resource Management**: Watch API quota usage and database storage
 
 ---
 
-Built with ❤️ using Pydantic AI, FastAPI, PostgreSQL, and Neo4j.
+## 🏆 Built With Excellence
+
+**🤖 Core Technologies:**
+- **Pydantic AI** - Advanced agent framework with tool orchestration
+- **FastAPI** - High-performance async web framework
+- **Google Gemini** - Cost-effective, high-quality LLM and embeddings
+- **Onyx Cloud** - Enterprise-grade document search and retrieval
+
+**🗄️ Data Layer:**
+- **PostgreSQL + pgvector** - High-performance vector similarity search
+- **Neo4j + Graphiti** - Temporal knowledge graph with relationship discovery
+
+**🎨 User Experience:**
+- **Rich Terminal UI** - Beautiful CLI with real-time progress indicators
+- **Streaming Responses** - Live response generation for immediate feedback
+- **Intelligent Fallbacks** - Graceful degradation ensuring system availability
+
+**💼 Enterprise Ready:**
+- **Production Logging** - Comprehensive monitoring and debugging
+- **Error Resilience** - Robust error handling and recovery mechanisms
+- **Scalable Architecture** - Designed for growth and high availability
+
+---
+
+*Building the future of intelligent document analysis with hybrid RAG technology.* 🚀
