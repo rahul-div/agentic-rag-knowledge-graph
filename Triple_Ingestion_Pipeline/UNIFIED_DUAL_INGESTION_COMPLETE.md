@@ -5,7 +5,7 @@
 You now have a **complete unified triple ingestion pipeline** that ingests documents into **all three systems** simultaneously:
 
 1. **🔮 Onyx Cloud** - Enterprise search and QA capabilities
-2. **📊 Graphiti Knowledge Graph** - Relationship and temporal queries  
+2. **📊 Neo4j + Graphiti** - Relationship and temporal queries  
 3. **🔍 pgvector** - Semantic similarity search
 
 This ensures that when you use `comprehensive_search_tool`, all systems have the same documents for true multi-system synthesis.
@@ -72,7 +72,7 @@ python unified_ingest_complete.py --onyx-mode skip
 |--------|------|---------|-------------|
 | `--documents` | String | `documents` | Path to documents folder |
 | `--onyx-mode` | Choice | `existing` | `existing` (CC-pair 285), `new` (fresh connector), or `skip` (skip Onyx entirely) |
-| `--clear` | Flag | False | Clear Graphiti + pgvector data (Onyx never touched) |
+| `--clear` | Flag | False | Clear Local Path: Dual Storage data (Onyx never touched) |
 | `--verbose` | Flag | False | Enable detailed logging |
 
 ### Full Example Commands
@@ -109,7 +109,7 @@ python unified_ingest_complete.py --documents documents --verbose
 - Reports upload success/failure statistics
 - **Skip mode saves 30-60 minutes** of indexing time!
 
-### Step 3: Graphiti + pgvector Ingestion
+### Step 3: Local Path: Dual Storage Ingestion
 
 - Uses existing `DocumentIngestionPipeline`
 - Creates semantic chunks with Gemini embeddings
@@ -160,14 +160,14 @@ python unified_ingest_complete.py --documents documents --verbose
 
 Use `--onyx-mode skip` when:
 - ✅ Documents are already indexed in Onyx Cloud (takes 30-60 minutes normally)
-- ✅ You want to add these documents to Graphiti + pgvector only
+- ✅ You want to add these documents to Local Path: Dual Storage only
 - ✅ You need to save significant processing time
 - ✅ You still want hybrid search to access all three systems
 
 ### Skip Mode Benefits
 
 - **Time Savings**: Saves 30-60 minutes of Onyx indexing time
-- **Hybrid Search Ready**: All three systems (Onyx + Graphiti + pgvector) available for search
+- **Hybrid Search Ready**: All three systems (Onyx + pgvector + Neo4j + Graphiti) available for search
 - **Perfect for Updates**: Ideal when adding existing Onyx documents to your knowledge graph
 - **Production Friendly**: Safe operation that never touches existing Onyx data
 
@@ -177,7 +177,7 @@ Use `--onyx-mode skip` when:
 # Skip Onyx ingestion for documents already indexed in Onyx
 python unified_ingest_complete.py --onyx-mode skip --verbose
 
-# Clear local data and skip Onyx (fresh Graphiti + pgvector)
+# Clear local data and skip Onyx (fresh Local Path: Dual Storage)
 python unified_ingest_complete.py --onyx-mode skip --clear --verbose
 
 # Custom documents folder with skip mode
@@ -212,7 +212,7 @@ This will:
 - **Onyx indexing**: 30-60 minutes (one-time overhead, but worth it for capabilities)
 - **Skip mode**: Saves 30-60 minutes when documents already indexed in Onyx
 - **Graphiti ingestion**: ~5-10 seconds per document (includes graph building)
-- **Total time**: Approximately 6-12 seconds per document for Graphiti + pgvector only
+- **Total time**: Approximately 6-12 seconds per document for Local Path: Dual Storage only
 - **Recommended**: Use skip mode when documents already exist in Onyx to save significant time
 
 ## 🔧 **CONFIGURATION**
@@ -236,7 +236,7 @@ GRAPHITI_API_KEY=your_graphiti_key    # For knowledge graph
 ✅ **Same documents in all three systems**
 ✅ **Unified ingestion pipeline** 
 ✅ **True multi-system synthesis**
-✅ **Comprehensive search across Onyx + Graphiti + pgvector**
+✅ **Comprehensive search across Onyx + Local Path: Dual Storage (pgvector + Neo4j + Graphiti)**
 ✅ **Robust error handling and validation**
 ✅ **CLI interface with full configurability**
 ✅ **Integration tests and validation**
@@ -253,6 +253,6 @@ GRAPHITI_API_KEY=your_graphiti_key    # For knowledge graph
 
 1. **First time**: Use `--onyx-mode existing` or `--onyx-mode new` for full ingestion
 2. **Subsequent updates**: Use `--onyx-mode skip` when documents already in Onyx
-3. **Development**: Use `--onyx-mode skip --clear` for rapid Graphiti + pgvector testing
+3. **Development**: Use `--onyx-mode skip --clear` for rapid Local Path: Dual Storage testing
 
 Your hybrid RAG system is now ready for **true multi-system intelligence**! 🎯

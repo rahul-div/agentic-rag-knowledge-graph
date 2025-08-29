@@ -1,15 +1,22 @@
 # 🤖 Hybrid Agentic RAG Knowledge Graph System
 
-A comprehensive **hybrid RAG system** that intelligently combines **Onyx Cloud enterprise search**, **Graphiti vector similarity search**, and **Graphiti knowledge graph search** into a unified intelligent agent platform. This system provides deep insights and relationship analysis across multiple data sources with automatic tool selection and fallback mechanisms.
+A comprehensive **hybrid RAG system** that intelligently combines **two distinct retrieval paths**: **Onyx Cloud enterprise search** and **Local Path: Dual Storage** into a unified intelligent agent platform. This system provides deep insights and relationship analysis across multiple data sources with automatic tool selection and fallback mechanisms.
 
-## 🚀 **System Architecture Overview**
+## 🚀 **Retrieval Architecture**
 
-This hybrid system seamlessly integrates three powerful search technologies:
+This hybrid system seamlessly integrates **two powerful retrieval paths**:
 
-- **🔍 Onyx Cloud**: Enterprise-grade document search with advanced semantic understanding and citation capabilities
-- **🧠 Graphiti Vector**: High-performance semantic similarity search using Google Gemini embeddings (768 dimensions)
-- **🕸️ Graphiti Knowledge Graph**: Temporal relationship discovery and entity analysis powered by Neo4j
-- **🤖 Intelligent Agent**: Pydantic AI agent that automatically selects optimal tools and provides fallback resilience
+### **Cloud Path: Onyx Enterprise Search** 
+- **🔍 Enterprise-grade document search** with advanced semantic understanding and citation capabilities
+- **☁️ Cloud-based infrastructure** with scalable processing
+
+### **Local Path: Dual Storage**
+- **🔍 pgvector**: Semantic similarity search using PostgreSQL + pgvector extension (768-dimensional embeddings)
+- **🕸️ Neo4j + Graphiti**: Entity relationship discovery and temporal knowledge graph analysis
+- **🏠 Local storage and processing** for complete data control
+
+### **Intelligent Orchestration**
+- **🤖 Pydantic AI Agent**: Automatically selects optimal tools and provides fallback resilience between both paths
 
 ### **Key Features:**
 - **🎯 Intelligent Tool Selection**: Agent automatically chooses the best search strategy for each query
@@ -52,14 +59,21 @@ python comprehensive_agent_cli.py
 
 ## 🎯 Technology Stack
 
-- **🤖 Pydantic AI** - Agent framework with tool orchestration
+### **Core Framework**
+- **🤖 Pydantic AI** - Agent framework with intelligent tool orchestration
 - **⚡ FastAPI** - High-performance API backend with streaming support
-- **🔍 Onyx Cloud** - Enterprise document search and retrieval
-- **🧠 Google Gemini** - LLM and embedding generation (cost-effective, high-quality)
-- **🕸️ Graphiti** - Knowledge graph and vector search capabilities
-- **🗄️ PostgreSQL + pgvector** - Vector database for similarity search
-- **📊 Neo4j** - Graph database for relationship discovery
 - **🖥️ Rich Terminal UI** - Beautiful CLI with real-time progress and colored output
+
+### **Retrieval Path 1: Onyx Cloud Enterprise Search**
+- **🔍 Onyx Cloud** - Enterprise document search and retrieval with advanced semantic understanding
+
+### **Local Path: Dual Storage**
+- **🔍 pgvector**: Semantic similarity search using PostgreSQL + pgvector extension (768-dimensional)
+- **🕸️ Neo4j + Graphiti**: Entity relationship discovery and temporal knowledge graph analysis
+- **🧠 Google Gemini** - LLM and embedding generation (cost-effective, high-quality)
+
+### **Intelligent Processing**
+- **🧠 Google Gemini** - Handles LLM reasoning, embedding generation, and semantic chunking for both retrieval paths
 
 ## 📋 Prerequisites
 
@@ -158,7 +172,7 @@ psql -d "$DATABASE_URL" -f sql/schema.sql
 3. Download connection credentials
 4. Update `.env` with cloud connection details
 
-## 📄 Document Ingestion Pipeline
+## 📄 Document Ingestion Pipelines
 
 ### Prepare Your Documents
 
@@ -167,7 +181,7 @@ Add your documents to the `documents/` folder:
 ```bash
 mkdir -p documents
 # Add your documentation files
-# Supported formats: .md, .txt files
+# Supported formats: .md, .txt, .json, .pdf, .docx, .xlsx, .pptx, .csv
 ```
 
 **Document Types That Work Best:**
@@ -178,28 +192,75 @@ mkdir -p documents
 - Status reports and project updates
 - Risk assessments and mitigation plans
 
-### Run Document Ingestion
+### Choose Your Ingestion Strategy
 
 **Important**: You must run ingestion first to populate the databases before the agent can provide meaningful responses.
 
+#### **Option 1: Triple System Ingestion (Recommended)**
+
+For **complete hybrid RAG capabilities** with **both retrieval paths**:
+
 ```bash
-# Standard ingestion with Graphiti knowledge graph
+# Navigate to triple ingestion pipeline
+cd Triple_Ingestion_Pipeline
+
+# Basic triple ingestion (Onyx Cloud + Local Path Dual Storage)
+python unified_ingest_complete.py
+
+# Clear existing data and start fresh
+python unified_ingest_complete.py --clear
+
+# Use verbose logging to see detailed progress
+python unified_ingest_complete.py --verbose
+
+# Skip Onyx ingestion (focus only on Local Path Dual Storage)
+python unified_ingest_complete.py --onyx-mode skip
+```
+
+**Triple Ingestion Features:**
+- **🔮 Onyx Cloud**: Enterprise document search with multiple modes (existing, new, skip)
+- **🏠 Local Path: Dual Storage**: Complete local retrieval system
+  - **🕸️ Neo4j + Graphiti**: Entity relationship discovery and temporal knowledge graph analysis
+  - **🔍 pgvector**: Semantic similarity search using PostgreSQL + pgvector extension
+- **⚙️ Flexible CLI**: Comprehensive options for different use cases
+
+#### **Option 2: Local Path Dual Storage Only**
+
+For **Local Path Dual Storage only** (pgvector + Neo4j + Graphiti, no Onyx Cloud):
+
+```bash
+# Standard Local Path Dual Storage ingestion
 python -m ingestion.ingest
 
 # Clean existing data and re-ingest
 python -m ingestion.ingest --clean
 
-# Faster processing without knowledge graph
+# Faster processing (reduced knowledge graph extraction)
 python -m ingestion.ingest --no-semantic --verbose
 ```
 
-The ingestion process will:
-- Parse and semantically chunk your documents using Google Gemini
-- Generate embeddings for vector search (768-dimensional)
-- Extract entities and relationships for knowledge graph
-- Store everything in PostgreSQL and Neo4j databases
+**Local Path Dual Storage Features:**
+- **🕸️ Neo4j + Graphiti**: Extract entities and relationships for temporal knowledge graph analysis
+- **🔍 pgvector**: Generate 768-dimensional embeddings for semantic similarity search using PostgreSQL
+- **🧠 Integrated Processing**: Parse and semantically chunk documents using Google Gemini
+- **🏠 Local Storage**: Everything stored locally in your PostgreSQL and Neo4j databases
 
 **Note**: Knowledge graph creation can be computationally intensive and may take considerable time for large document sets.
+
+### **Ingestion Pipeline Architecture**
+
+Your system supports two distinct ingestion approaches:
+
+| Approach | Location | Systems | Use Case |
+|----------|----------|---------|----------|
+| **Triple Ingestion** | `Triple_Ingestion_Pipeline/` | Onyx Cloud + Local Path Dual Storage | **Recommended** - Complete hybrid RAG with all systems |
+| **Local Path Dual Storage Only** | `ingestion/` | Local Path Dual Storage (pgvector + Neo4j + Graphiti) | Focused on local knowledge graph + vector search |
+
+**Key Files:**
+- **`Triple_Ingestion_Pipeline/unified_ingest_complete.py`** - Production triple system ingestion (Onyx Cloud + Local Path Dual Storage)
+- **`ingestion/ingest.py`** - Local Path Dual Storage ingestion (pgvector + Neo4j + Graphiti)
+- **`ingestion/onyx_ingest.py`** - Onyx Cloud integration module (used by triple pipeline)
+- **`ingestion/onyx_cloud_integration.py`** - Standalone Onyx connector workflow
 
 ## 🤖 Intelligent Agent System
 
@@ -211,15 +272,15 @@ The hybrid agent (`agent/agent.py`) includes 10 specialized tools:
 1. **`onyx_search`** - Advanced document search with relevance scoring
 2. **`onyx_answer_with_quote`** - QA with citations and supporting quotes
 
-#### **Graphiti Tools** (Vector & Knowledge Graph)
-3. **`vector_search`** - Semantic similarity search across document chunks
-4. **`graph_search`** - Knowledge graph queries for facts and relationships
-5. **`hybrid_search`** - Combined vector and keyword search
+#### **Local Path Dual Storage Tools** (pgvector + Neo4j + Graphiti)
+3. **`vector_search`** - Semantic similarity search across document chunks (pgvector)
+4. **`graph_search`** - Knowledge graph queries for facts and relationships (Neo4j)
+5. **`hybrid_search`** - Combined pgvector + keyword search
 6. **`get_document`** - Retrieve complete document content
 7. **`list_documents`** - Browse available documents with metadata
-8. **`get_entity_relationships`** - Explore entity connections in knowledge graph
-9. **`get_entity_timeline`** - Timeline analysis for specific entities
-10. **`comprehensive_search`** - Multi-system search with intelligent synthesis
+8. **`get_entity_relationships`** - Explore entity connections in Neo4j knowledge graph
+9. **`get_entity_timeline`** - Timeline analysis for specific entities (Neo4j temporal)
+10. **`comprehensive_search`** - Multi-system search with intelligent synthesis (Onyx + Local Path Dual Storage)
 
 ### Tool Selection Intelligence
 
@@ -238,9 +299,9 @@ The system includes robust fallback mechanisms:
 ```
 Query → Agent Decision
 ├── Onyx Available? → Try Onyx tools first
-│   ├── Success → Continue with Graphiti for synthesis
-│   └── Failure → Fallback to Graphiti tools only
-└── Graphiti Available? → Use vector + graph search
+│   ├── Success → Continue with Local Path Dual Storage for synthesis
+│   └── Failure → Fallback to Local Path Dual Storage tools only
+└── Local Path Dual Storage Available? → Use vector + graph search
     ├── Vector Success + Graph Success → Multi-system synthesis
     ├── Vector Success + Graph Failure → Vector-only results
     └── Vector Failure + Graph Success → Graph-only results
@@ -269,7 +330,7 @@ python comprehensive_agent_cli.py
 
 ```text
 /help     - Show all available commands and usage
-/health   - Check connectivity to all systems (Onyx + Graphiti)
+/health   - Check connectivity to all systems (Onyx + Local Path Dual Storage)
 /status   - Show current session and system information
 /clear    - Clear conversation history
 /quit     - Exit the CLI gracefully
@@ -293,7 +354,7 @@ Based on comprehensive search across all systems, the financial system consists 
   3. graph_search - Discovered entity relationships
   4. comprehensive_search - Multi-system synthesis
 
-📊 Response generated in 12.4s using Onyx + Graphiti synthesis
+📊 Response generated in 12.4s using Onyx + Local Path Dual Storage synthesis
 ────────────────────────────────────────────────────────────
 
 You: Show me the timeline of authentication decisions
@@ -400,13 +461,13 @@ This system represents a **next-generation RAG architecture** that combines the 
 - **Document Set Management**: Organized document collections with metadata and access control
 - **Fallback Resilience**: Graceful degradation when cloud services are unavailable
 
-#### **2. Graphiti Vector Database (Semantic Layer)**  
+#### **2. pgvector Database (Semantic Layer)**  
 - **High-Performance Similarity Search**: 768-dimensional Google Gemini embeddings with pgvector optimization
 - **Semantic Chunking**: Intelligent document splitting using LLM analysis for optimal context preservation
 - **Fast Retrieval**: Sub-second search across large document collections
 - **Contextual Relevance**: Returns semantically related content regardless of keyword matching
 
-#### **3. Graphiti Knowledge Graph (Relationship Layer)**
+#### **3. Neo4j + Graphiti (Relationship Layer)**
 - **Temporal Entity Tracking**: Understands how information and relationships evolve over time
 - **Graph Traversal**: Discovers hidden connections between entities, concepts, and decisions
 - **Relationship Discovery**: Maps complex interdependencies between system components
@@ -432,7 +493,7 @@ This system represents a **next-generation RAG architecture** that combines the 
    - Enterprise queries → Onyx cloud for advanced capabilities
 
 3. **🛡️ Resilient Design**: System remains functional even with partial failures
-   - Onyx unavailable → Falls back to Graphiti systems
+   - Onyx unavailable → Falls back to Local Path Dual Storage
    - Vector search fails → Uses knowledge graph only
    - Knowledge graph unavailable → Relies on vector similarity
 
@@ -465,11 +526,16 @@ agentic-rag-knowledge-graph/
 │   │   └── config.py                  # Configuration management
 │
 ├── 📄 Document Processing
-│   ├── ingestion/
-│   │   ├── ingest.py                  # Main ingestion pipeline
-│   │   ├── chunker.py                 # Semantic document chunking
-│   │   ├── embedder.py                # Google Gemini embeddings
-│   │   └── graph_builder.py           # Knowledge graph construction
+│   ├── Triple_Ingestion_Pipeline/     # Complete triple system ingestion
+│   │   ├── unified_ingest_complete.py # Main triple ingestion script
+│   │   └── UNIFIED_DUAL_INGESTION_COMPLETE.md # Documentation
+│   ├── ingestion/                     # Graphiti-only ingestion components
+│   │   ├── ingest.py                  # Graphiti ingestion pipeline (pgvector + Neo4j)
+│   │   ├── onyx_ingest.py            # Onyx Cloud integration module
+│   │   ├── onyx_cloud_integration.py # Standalone Onyx connector workflow
+│   │   ├── chunker.py                # Semantic document chunking
+│   │   ├── embedder.py               # Google Gemini embeddings
+│   │   └── graph_builder.py          # Knowledge graph construction
 │
 ├── 🗄️ Database & Configuration
 │   ├── sql/schema.sql                 # PostgreSQL + pgvector schema
@@ -579,7 +645,7 @@ curl http://localhost:8058/health
 #### **Component-Specific Issues**
 
 **Onyx Cloud Unavailable:**
-- System automatically falls back to Graphiti-only mode
+- System automatically falls back to Local Path Dual Storage-only mode
 - Agent will use `vector_search` + `graph_search` tools
 - Check Onyx API key and network connectivity
 
@@ -602,10 +668,14 @@ curl http://localhost:8058/health
 
 #### **For Large Document Sets**
 ```bash
-# Use faster ingestion (no knowledge graph)
+# Option 1: Use faster triple ingestion (skip Onyx, focus on Local Path Dual Storage)
+cd Triple_Ingestion_Pipeline
+python unified_ingest_complete.py --onyx-mode skip --verbose
+
+# Option 2: Use Local Path Dual Storage only (reduced knowledge graph extraction)
 python -m ingestion.ingest --no-semantic --verbose
 
-# Or optimize chunk size
+# Or optimize chunk size for Local Path Dual Storage ingestion
 python -m ingestion.ingest --chunk-size 1000
 ```
 
@@ -631,7 +701,7 @@ APP_ENV=development
 #### **Common Error Patterns**
 
 **"Tools used: 4" with Onyx failures:**
-- Normal behavior: Agent tries multiple Onyx tools, falls back to Graphiti
+- Normal behavior: Agent tries multiple Onyx tools, falls back to Local Path Dual Storage
 - System working correctly with resilient fallback
 
 **"No answer on attempt 1/2/3":**

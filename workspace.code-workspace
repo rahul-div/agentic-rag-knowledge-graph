@@ -1,0 +1,83 @@
+{
+  "folders": [
+    {
+      "name": "Hybrid RAG System",
+      "path": "/Users/rahul/Desktop/Graphiti/agentic-rag-knowledge-graph"
+    }
+  ],
+  "settings": {
+    "files.exclude": {
+      "**/__pycache__": true,
+      "**/*.pyc": true,
+      ".env": false
+    },
+    "python.defaultInterpreterPath": ".venv/bin/python",
+    "workbench.colorTheme": "Default Dark+",
+    "python.terminal.activateEnvironment": true
+  },
+  "extensions": {
+    "recommendations": [
+      "ms-python.python",
+      "GitHub.copilot",
+      "GitHub.copilot-chat",
+      "ms-toolsai.jupyter"
+    ]
+  },
+  "tasks": {
+    "version": "2.0.0",
+    "tasks": [
+      {
+        "label": "Start API Server",
+        "type": "shell",
+        "command": "./start_api.sh",
+        "group": "build",
+        "presentation": {
+          "echo": true,
+          "reveal": "always",
+          "focus": false,
+          "panel": "new"
+        },
+        "problemMatcher": []
+      },
+      {
+        "label": "Start CLI Client",
+        "type": "shell",
+        "command": "./start_cli.sh",
+        "group": "build",
+        "presentation": {
+          "echo": true,
+          "reveal": "always",
+          "focus": false,
+          "panel": "new"
+        },
+        "problemMatcher": []
+      },
+      {
+        "label": "Run Quick Start Check",
+        "type": "shell",
+        "command": "python3",
+        "args": ["quick_start.py"],
+        "group": "test",
+        "presentation": {
+          "echo": true,
+          "reveal": "always",
+          "focus": false,
+          "panel": "shared"
+        }
+      },
+      {
+        "label": "Ingest Documents",
+        "type": "shell",
+        "command": "python",
+        "args": ["-m", "ingestion.ingest"],
+        "group": "build",
+        "presentation": {
+          "echo": true,
+          "reveal": "always",
+          "focus": false,
+          "panel": "shared"
+        }
+      }
+    ]
+  }
+}

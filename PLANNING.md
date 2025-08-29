@@ -88,16 +88,16 @@
 ├─────────────────────────────────────────────────────────────┤
 │                  Dual Storage Layer                         │
 │  ┌─────────────────┐          ┌────────────────────┐      │
-│  │   ONYX CLOUD    │          │    GRAPHITI LOCAL  │      │
-│  │ ┌─────────────┐ │          │  ┌───────────────┐ │      │
-│  │ │ Enterprise  │ │          │  │ Neo4j +       │ │      │
-│  │ │ Vector DB   │ │          │  │ Temporal      │ │      │
-│  │ │ (Scalable)  │ │          │  │ Knowledge     │ │      │
-│  │ └─────────────┘ │          │  │ Graph         │ │      │
+│  │   ONYX CLOUD    │          │    LOCAL DUAL      │      │
+│  │ ┌─────────────┐ │          │    STORAGE         │      │
+│  │ │ Enterprise  │ │          │  ┌───────────────┐ │      │
+│  │ │ Vector DB   │ │          │  │ pgvector      │ │      │
+│  │ │ (Scalable)  │ │          │  │ Semantic      │ │      │
+│  │ └─────────────┘ │          │  │ Search        │ │      │
 │  │ ┌─────────────┐ │          │  └───────────────┘ │      │
 │  │ │ 40+ Connec- │ │          │  ┌───────────────┐ │      │
-│  │ │ tors & APIs │ │          │  │ Entity        │ │      │
-│  │ └─────────────┘ │          │  │ Relationships │ │      │
+│  │ │ tors & APIs │ │          │  │ Neo4j +       │ │      │
+│  │ └─────────────┘ │          │  │ Graphiti      │ │      │
 │  └─────────────────┘          │  └───────────────┘ │      │
 ├─────────────────────────────────────────────────────────────┤
 │                 Dual Ingestion Pipeline                     │
@@ -107,10 +107,10 @@
 │  │   PROCESSOR     │   │ • Metadata Mapping           │   │
 │  │                 │   │ • Enterprise Ingestion       │   │
 │  │   (Semantic     │   └─────────────────────────────┘   │
-│  │    Chunking)    │   ┌──── Graphiti Local ───────────┐  │
-│  │                 │──►│ • Entity Extraction          │   │
-│  │                 │   │ • Relationship Mapping       │   │
-│  │                 │   │ • Temporal Graph Building    │   │
+│  │    Chunking)    │   ┌──── Local Dual Storage ────────┐  │
+│  │                 │──►│ • pgvector Semantic Storage   │   │
+│  │                 │   │ • Neo4j + Graphiti KG Build  │   │
+│  │                 │   │ • Entity & Relationship Map  │   │
 │  └─────────────────┘   └─────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -147,9 +147,9 @@
 
 **What Stays The Same:**
 - All agent tools and functionality
-- Dual ingestion pipeline logic
+- Triple ingestion pipeline logic (Onyx Cloud + Local Dual Storage)
 - Intelligent routing algorithms
-- Graphiti knowledge graph system
+- Local Dual Storage system (pgvector + Neo4j + Graphiti)
 
 ---
 
@@ -238,8 +238,7 @@ Document → Semantic Chunking → Gemini Embeddings → PostgreSQL
 
 # Enhanced Dual Ingestion Flow
 Document → Semantic Chunking → ┌─ Onyx Cloud API → Onyx Vector Store
-                              └─ Graphiti Pipeline → Neo4j Knowledge Graph
-                              └─ Backup Vector Store → PostgreSQL (optional)
+                              └─ Local Dual Storage → pgvector + Neo4j + Graphiti
 ```
 
 ### **Search Strategy Matrix**
@@ -275,12 +274,14 @@ Document → Semantic Chunking → ┌─ Onyx Cloud API → Onyx Vector Store
 ## Risk Mitigation
 
 ### **Technical Risks & Mitigations:**
-1. **Onyx API Reliability** → Keep Graphiti as fallback system
+
+1. **Onyx API Reliability** → Keep Local Dual Storage as fallback system
 2. **Performance Degradation** → Implement intelligent caching and optimization
 3. **Data Consistency** → Build validation and synchronization mechanisms
 4. **Migration Complexity** → Phased approach with comprehensive testing
 
 ### **Operational Risks & Mitigations:**
+
 1. **Increased Complexity** → Comprehensive documentation and monitoring
 2. **Cost Management** → Clear migration path to Community Edition
 3. **Team Learning Curve** → Gradual rollout with extensive documentation

@@ -149,6 +149,15 @@ class ComprehensiveSearchInput(BaseModel):
     search_type: str = Field(default="hybrid", description="Search type for compatible systems")
 
 
+class LocalDualSearchInput(BaseModel):
+    """Input for Local Path: Dual Storage search (vector + graph only)."""
+    
+    query: str = Field(..., description="Search query")
+    limit: int = Field(default=10, description="Maximum number of vector results")
+    use_vector: bool = Field(default=True, description="Include vector similarity search")
+    use_graph: bool = Field(default=True, description="Include knowledge graph search")
+
+
 # Tool Implementation Functions
 async def vector_search_tool(input_data: VectorSearchInput) -> List[ChunkResult]:
     """
@@ -375,6 +384,188 @@ async def get_entity_timeline_tool(
     except Exception as e:
         logger.error(f"Entity timeline query failed: {e}")
         return []
+
+
+# Enhanced Local Path: Dual Storage Synthesis Tool
+async def local_dual_search_tool(input_data: LocalDualSearchInput) -> Dict[str, Any]:
+    """
+    SMART Local Path: Dual Storage search combining vector similarity + knowledge graph relationships.
+    
+    This tool performs intelligent synthesis of:
+    - 🔍 pgvector semantic similarity search (contextual content)  
+    - 🕸️ Neo4j + Graphiti knowledge graph search (hidden relationships & insights)
+    
+    Returns a synthesized response that combines semantic similarity with relationship discovery,
+    complete with source citations and confidence scoring.
+    
+    Args:
+        input_data: Search parameters for local dual storage search
+        
+    Returns:
+        Dictionary with synthesized answer, source citations, and relationship insights
+    """
+    try:
+        results = {
+            "search_type": "local_dual_storage_synthesis",
+            "query": input_data.query,
+            "synthesized_answer": "",
+            "vector_results": [],
+            "graph_results": [], 
+            "source_citations": [],
+            "relationship_insights": [],
+            "confidence_score": 0.0,
+            "synthesis_metadata": {
+                "vector_sources": 0,
+                "graph_facts": 0,
+                "synthesis_quality": "unknown"
+            }
+        }
+        
+        # Execute both searches in parallel for optimal performance
+        tasks = []
+        
+        if input_data.use_vector:
+            tasks.append(("vector", vector_search_tool(VectorSearchInput(
+                query=input_data.query, 
+                limit=input_data.limit
+            ))))
+            
+        if input_data.use_graph:
+            tasks.append(("graph", graph_search_tool(GraphSearchInput(
+                query=input_data.query
+            ))))
+        
+        if not tasks:
+            results["synthesized_answer"] = "No search systems enabled."
+            return results
+            
+        # Parallel execution
+        search_results = await asyncio.gather(
+            *[task for _, task in tasks], 
+            return_exceptions=True
+        )
+        
+        # Process results
+        vector_data = []
+        graph_data = []
+        
+        for i, (search_type, search_result) in enumerate(zip([t[0] for t in tasks], search_results)):
+            if isinstance(search_result, Exception):
+                logger.error(f"❌ {search_type} search failed: {search_result}")
+                continue
+                
+            if search_type == "vector" and search_result:
+                vector_data = search_result
+                results["vector_results"] = [
+                    {
+                        "content": chunk.content,
+                        "score": chunk.score,
+                        "source": chunk.document_title,
+                        "document_id": chunk.document_id
+                    }
+                    for chunk in search_result[:5]  # Top 5 results
+                ]
+                results["synthesis_metadata"]["vector_sources"] = len(search_result)
+                
+            elif search_type == "graph" and search_result:
+                graph_data = search_result
+                results["graph_results"] = [
+                    {
+                        "fact": fact.fact,
+                        "confidence": getattr(fact, 'confidence', 'medium'),
+                        "source": getattr(fact, 'source_node_uuid', 'knowledge_graph')
+                    }
+                    for fact in search_result[:5]  # Top 5 facts
+                ]
+                results["synthesis_metadata"]["graph_facts"] = len(search_result)
+        
+        # INTELLIGENT SYNTHESIS: Combine semantic similarity with relationship insights
+        synthesis_parts = []
+        source_citations = []
+        confidence_scores = []
+        
+        # 1. Primary content from highest-scoring vector results
+        if vector_data:
+            best_chunks = sorted(vector_data, key=lambda x: x.score, reverse=True)[:3]
+            
+            primary_content = []
+            for i, chunk in enumerate(best_chunks):
+                if chunk.score > 0.7:  # High-confidence threshold
+                    content_preview = chunk.content[:300] + "..." if len(chunk.content) > 300 else chunk.content
+                    primary_content.append(content_preview)
+                    source_citations.append({
+                        "type": "semantic_similarity",
+                        "source": chunk.document_title,
+                        "relevance_score": chunk.score,
+                        "document_id": chunk.document_id
+                    })
+                    confidence_scores.append(chunk.score)
+            
+            if primary_content:
+                synthesis_parts.append(f"**Primary Content (Semantic Search):** {' '.join(primary_content[:2])}")
+        
+        # 2. Relationship insights from knowledge graph
+        if graph_data:
+            relationship_insights = []
+            for fact in graph_data[:3]:  # Top 3 relationship facts
+                if hasattr(fact, 'fact') and fact.fact:
+                    relationship_insights.append(fact.fact)
+                    source_citations.append({
+                        "type": "knowledge_graph_relationship", 
+                        "source": "Knowledge Graph",
+                        "fact": fact.fact,
+                        "uuid": getattr(fact, 'uuid', 'unknown')
+                    })
+            
+            if relationship_insights:
+                results["relationship_insights"] = relationship_insights
+                relationships_text = " | ".join(relationship_insights[:2])
+                synthesis_parts.append(f"**Hidden Relationships & Insights:** {relationships_text}")
+        
+        # 3. Create unified intelligent synthesis
+        if synthesis_parts:
+            results["synthesized_answer"] = "\n\n".join(synthesis_parts)
+            
+            # Calculate confidence based on multi-system validation
+            if vector_data and graph_data:
+                results["synthesis_metadata"]["synthesis_quality"] = "high_multi_system"
+                avg_vector_score = sum(confidence_scores) / len(confidence_scores) if confidence_scores else 0.5
+                graph_boost = 0.2 if graph_data else 0  # Knowledge graph adds confidence
+                results["confidence_score"] = min(avg_vector_score + graph_boost, 1.0)
+                
+            elif vector_data:
+                results["synthesis_metadata"]["synthesis_quality"] = "medium_vector_only"
+                results["confidence_score"] = sum(confidence_scores) / len(confidence_scores) if confidence_scores else 0.5
+                
+            elif graph_data:
+                results["synthesis_metadata"]["synthesis_quality"] = "medium_graph_only"
+                results["confidence_score"] = 0.6  # Knowledge graph provides good insights
+                
+        else:
+            results["synthesized_answer"] = f"No relevant information found for query: {input_data.query}"
+            results["synthesis_metadata"]["synthesis_quality"] = "no_results"
+            results["confidence_score"] = 0.0
+        
+        # 4. Finalize source citations
+        results["source_citations"] = source_citations
+        
+        logger.info(f"🎯 Local Dual Storage synthesis: {results['synthesis_metadata']['vector_sources']} vector + {results['synthesis_metadata']['graph_facts']} graph sources")
+        
+        return results
+        
+    except Exception as e:
+        logger.error(f"Local dual search synthesis failed: {e}")
+        return {
+            "search_type": "local_dual_storage_synthesis", 
+            "query": input_data.query,
+            "synthesized_answer": f"Search synthesis failed due to error: {str(e)}",
+            "vector_results": [],
+            "graph_results": [],
+            "source_citations": [],
+            "relationship_insights": [],
+            "confidence_score": 0.0,
+            "error": str(e)
+        }
 
 
 # Combined search function for agent use
@@ -650,12 +841,15 @@ async def onyx_answer_with_quote_tool(input_data: OnyxAnswerInput, onyx_service=
 
 async def comprehensive_search_tool(input_data: ComprehensiveSearchInput, onyx_service=None, document_set_id=None) -> Dict[str, Any]:
     """
-    Perform comprehensive search combining Onyx, vector, and knowledge graph systems.
+    Perform comprehensive search combining Local Path: Dual Storage and Onyx systems.
     
-    Implements intelligent fallback strategy based on our validated hybrid patterns:
-    1. Try Onyx Cloud first (highest quality, document set based)
-    2. Fall back to Graphiti vector + graph search 
-    3. Combine results intelligently based on success rates
+    Implements LOCAL-FIRST strategy based on system configuration:
+    1. Try Local Path: Dual Storage first (pgvector + Neo4j + Graphiti)  
+    2. Use Onyx Cloud as enhancement/fallback for enterprise coverage
+    3. Combine results intelligently with local results taking priority
+    
+    Note: Current implementation still executes Onyx first for comprehensive_search tool,
+    but system prompt directs agents to prioritize individual local tools (vector_search, graph_search) over comprehensive_search for most queries.
 
     Args:
         input_data: Comprehensive search parameters 

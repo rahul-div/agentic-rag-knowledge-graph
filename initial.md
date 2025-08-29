@@ -44,6 +44,7 @@ Important Note: You’re not here to simply complete tasks — you're here to en
 
 ### **PostgreSQL with pgvector**
 - **📚 PostgreSQL Docs:** https://www.postgresql.org/docs/
+- **🔍 Neon Postgres Docs:** https://neon.com/docs
 - **🔍 pgvector Extension:** https://github.com/pgvector/pgvector
 - **🎯 Key Focus:** Vector operations, indexing strategies, connection pooling
 - **⚠️ Critical:** Vector dimension consistency across embedding models

@@ -25,8 +25,8 @@
 Your Hybrid RAG Agent combines three powerful search systems into a unified intelligence platform:
 
 - **🏢 Onyx Cloud:** Enterprise document search with citations
-- **🔍 Graphiti Vector:** Semantic similarity search across document chunks  
-- **🕸️ Graphiti Knowledge Graph:** Entity relationships and temporal facts
+- **🔍 pgvector:** Semantic similarity search using PostgreSQL + pgvector extension  
+- **🕸️ Neo4j + Graphiti:** Entity relationship discovery and temporal knowledge graph analysis
 
 ### **Agent Foundation**
 ```python
@@ -140,7 +140,8 @@ if input_data.include_onyx and onyx_service is not None:
         # Continue to Phase 2 for synthesis
 ```
 
-#### **Phase 2: Graphiti Systems (Parallel Execution)**
+#### **Phase 2: Local Path Dual Storage (Parallel Execution)**
+
 ```python
 # PARALLEL EXECUTION - Vector and Graph run simultaneously
 graphiti_tasks = []
@@ -194,7 +195,7 @@ if input_data.include_graph:
 #### **Step 2: Parallel Execution (Lines 739-744)**
 ```python
 if graphiti_tasks:
-    logger.info(f"Running Graphiti fallback with {len(graphiti_tasks)} search types")
+    logger.info(f"Running Local Path Dual Storage fallback with {len(graphiti_tasks)} search types")
     
     # 🔥 CRITICAL: asyncio.gather runs ALL coroutines in PARALLEL
     search_results = await asyncio.gather(
@@ -297,7 +298,7 @@ async def create_hybrid_agent_dependencies(session_id: str, cc_pair_id: int = 28
 │                    FALLBACK CHAIN                           │
 │                                                             │
 │  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐    │
-│  │    ONYX     │    │   GRAPHITI  │    │   GRACEFUL  │    │
+│  │    ONYX     │    │  LOCAL DUAL │    │   GRACEFUL  │    │
 │  │   CLOUD     │───▶│   SYSTEMS   │───▶│    ERROR    │    │
 │  │             │    │             │    │             │    │
 │  │ • Doc Sets  │    │ • Vector DB │    │ • User Msg  │    │
@@ -313,7 +314,7 @@ async def create_hybrid_agent_dependencies(session_id: str, cc_pair_id: int = 28
 "onyx_attempted -> onyx_success -> vector_search_started -> graph_search_started 
  -> vector_success -> graph_success -> multi_system_synthesis_complete"
 
-# Onyx fails, Graphiti succeeds:
+# Onyx fails, Local Path Dual Storage succeeds:
 "onyx_attempted -> onyx_failed -> vector_search_started -> graph_search_started
  -> vector_success -> graph_success -> vector_graph_synthesis"
 
@@ -332,7 +333,7 @@ async def create_hybrid_agent_dependencies(session_id: str, cc_pair_id: int = 28
 |--------------|-------------------|----------------|---------------|
 | All systems succeed | `comprehensive_multi_system` | `very_high` | Onyx primary + Graph relationships + Vector evidence |
 | Only Onyx succeeds | `onyx_primary` | `high` | Direct Onyx answer with citations |
-| Only Graphiti succeeds | `vector_graph_synthesis` | `medium` | Best vector + Graph relationships |
+| Only Local Path Dual Storage succeeds | `vector_graph_synthesis` | `medium` | Best vector + Graph relationships |
 | Only Vector succeeds | `vector_primary` | `medium` | Best similarity match |
 | Only Graph succeeds | `graph_primary` | `low` | Graph facts summary |
 | Nothing succeeds | `no_results` | `none` | Error message with guidance |
@@ -490,7 +491,7 @@ The `if/elif` pattern ensures **each result is processed exactly once** with the
 - **Total Comprehensive:** 3-8 seconds (parallel execution)
 
 ### **Fallback Behavior**
-- **Onyx Failure:** Immediate fallback to Graphiti (no delay)
+- **Onyx Failure:** Immediate fallback to Local Path Dual Storage (no delay)
 - **Partial Success:** Best available results synthesis
 - **Complete Failure:** Graceful error with user guidance
 
@@ -515,7 +516,7 @@ agent/
 
 1. **🤖 Agent Intelligence:** LLM selects the best tool based on query complexity
 2. **⚡ Parallel Execution:** Vector and Graph searches run simultaneously for speed
-3. **🔄 Smart Fallback:** Graceful degradation from Onyx → Graphiti → Error
+3. **🔄 Smart Fallback:** Graceful degradation from Onyx → Local Path Dual Storage → Error
 4. **🧠 Synthesis:** Multi-system responses provide comprehensive answers
 5. **🔧 Dependency Injection:** Clean separation of concerns with injectable services
 6. **📊 Comprehensive Coverage:** 10 tools covering all search scenarios
