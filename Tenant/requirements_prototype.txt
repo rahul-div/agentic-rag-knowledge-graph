@@ -1,0 +1,74 @@
+# Multi-Tenant RAG Prototype Requirements
+# Based on existing validated components + FastAPI additions
+
+# ============================================================================
+# CORE AI AND GRAPHITI DEPENDENCIES (from existing requirements.txt)
+# ============================================================================
+
+# Graphiti core with Google Gemini support
+graphiti-core[google-genai]==0.18.0
+
+# Pydantic AI framework
+pydantic-ai==0.3.2
+pydantic-ai-slim==0.3.2
+pydantic-graph==0.3.2
+
+# Google Gemini API
+google-genai>=1.16.1
+google-auth>=2.40.0
+
+# ============================================================================
+# DATABASE AND STORAGE (from existing)
+# ============================================================================
+
+# Neo4j graph database
+neo4j>=5.28.0
+
+# PostgreSQL/Neon database
+asyncpg>=0.30.0
+psycopg2-binary>=2.9.9
+
+# ============================================================================
+# PROTOTYPE API ADDITIONS
+# ============================================================================
+
+# FastAPI and server components
+fastapi>=0.115.13
+uvicorn[standard]>=0.34.3
+python-multipart>=0.0.20
+
+# JWT Authentication
+python-jose[cryptography]>=3.3.0
+
+# HTTP clients
+httpx>=0.28.1
+aiohttp>=3.12.13
+
+# Environment management
+python-dotenv>=1.0.0
+
+# File handling
+aiofiles>=23.2.1
+
+# ============================================================================
+# EXISTING DEPENDENCIES (from requirements.txt)
+# ============================================================================
+
+# Data processing
+pandas>=2.2.3
+numpy>=1.26.4
+scikit-learn>=1.6.2
+
+# Text processing
+python-docx>=1.1.2
+markdown>=3.7
+beautifulsoup4>=4.12.3
+
+# Async and utilities
+asyncio>=3.4.3
+tenacity>=9.0.0
+typing-extensions>=4.12.2
+
+# Development and testing
+pytest>=8.3.3
+pytest-asyncio>=0.25.0

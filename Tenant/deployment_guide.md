@@ -2,7 +2,7 @@
 
 ## 🚀 **Overview**
 
-This guide provides step-by-step instructions for deploying the multi-tenant RAG system using **Neon PostgreSQL** and **Neo4j + Graphiti** with complete tenant isolation.
+This guide provides step-by-step instructions for deploying the multi-tenant RAG system using **Neon PostgreSQL (Project-per-Tenant)** and **Neo4j + Graphiti (group_id namespacing)** following official best practices for production-ready multi-tenancy.
 
 ## 📋 **Prerequisites**
 
@@ -13,27 +13,43 @@ This guide provides step-by-step instructions for deploying the multi-tenant RAG
 - 20GB+ storage for databases
 
 ### **External Services**
-- **Neon PostgreSQL**: Serverless PostgreSQL with pgvector
-- **Neo4j**: Graph database (self-hosted or cloud)
+- **Neon PostgreSQL**: Serverless PostgreSQL with pgvector (one project per tenant)
+- **Neon API Key**: For automated project creation and management
+- **Neo4j**: Graph database (single shared instance with namespacing)
 - **OpenAI API Key**: For embeddings and LLM (or alternative providers)
 
-## 🏗️ **Architecture Components**
+## 🏗️ **CORRECTED Architecture Components**
 
 ```
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   FastAPI       │    │   Neon          │    │   Neo4j         │
-│   Multi-Tenant  │────│   PostgreSQL    │    │   + Graphiti    │
-│   API Server    │    │   + pgvector    │    │   Knowledge     │
-│                 │    │   (RLS)         │    │   Graph         │
-└─────────────────┘    └─────────────────┘    └─────────────────┘
-         │                       │                       │
-         └───────────────────────┼───────────────────────┘
-                                 │
-                    ┌─────────────────┐
-                    │   Pydantic AI   │
-                    │   Agent with    │
-                    │   Tenant Tools  │
-                    └─────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│                  Multi-Tenant API Layer                     │
+│  ┌─────────────────┐          ┌────────────────────┐      │
+│  │   FastAPI       │          │   Tenant Auth      │      │
+│  │   + JWT Auth    │          │   Context Injection│      │
+│  └────────┬────────┘          └────────────────────┘      │
+├───────────┴─────────────────────────────────────────────────┤
+│              Enhanced Pydantic AI Agent                    │
+│  ┌─────────────────┐          ┌────────────────────┐      │
+│  │  Tenant-Aware   │◄────────►│   Same 10+ Tools   │      │
+│  │  Agent          │          │   + Tenant Context │      │
+│  │  (Same LLMs)    │          │   Injection        │      │
+│  └─────────────────┘          └────────────────────┘      │
+├─────────────────────────────────────────────────────────────┤
+│                Multi-Tenant Data Layer                     │
+│  ┌─────────────────┐          ┌────────────────────┐      │
+│  │   Neon Projects │          │    Neo4j + Graphiti│      │
+│  │   (Per-Tenant)  │          │    + group_id      │      │
+│  │   Isolated DBs  │          │    Namespacing     │      │
+│  └─────────────────┘          └────────────────────┘      │
+├─────────────────────────────────────────────────────────────┤
+│                Tenant Management Layer                     │
+│  ┌─────────────────┐  ┌───────────────┐  ┌──────────────┐ │
+│  │   Catalog DB    │  │   Per-Tenant  │  │  Neon API    │ │
+│  │   Tenant        │  │   Database    │  │  Integration │ │
+│  │   Metadata      │  │   Complete    │  │  (Automated) │ │
+│  │   (Catalog DB)  │  │   Isolation   │  │              │ │
+│  └─────────────────┘  └───────────────┘  └──────────────┘ │
+└─────────────────────────────────────────────────────────────┘
 ```
 
 ## 🛠️ **Deployment Steps**
@@ -58,6 +74,7 @@ This guide provides step-by-step instructions for deploying the multi-tenant RAG
 
    **Create `requirements.txt`:**
    ```txt
+   # Core Dependencies
    asyncpg==0.29.0
    fastapi==0.104.1
    uvicorn[standard]==0.24.0
@@ -65,36 +82,95 @@ This guide provides step-by-step instructions for deploying the multi-tenant RAG
    pydantic-ai==0.0.7
    python-jose[cryptography]==3.3.0
    python-multipart==0.0.6
+   
+   # Multi-tenant Architecture
+   neon-api-client==0.2.0
+   
+   # Graph Database
    graphiti-core==0.1.0
    neo4j==5.15.0
+   
+   # AI and Embeddings
    openai==1.3.0
+   
+   # Vector Database
    pgvector==0.2.4
+   
+   # Additional utilities
+   httpx==0.25.0
+   asyncio-throttle==1.0.2
    ```
 
 ### **Step 2: Database Setup**
 
-#### **2.1 Neon PostgreSQL Setup**
+#### **2.1 Neon PostgreSQL Setup (Project-per-Tenant)**
 
-1. **Create Neon account and project:**
+1. **Create Neon account and get API key:**
    - Visit [neon.tech](https://neon.tech)
-   - Create account and new project
-   - Note the connection string
+   - Create account and generate API key
+   - This will be used for automated tenant project creation
 
-2. **Run database schema:**
+2. **Create catalog database (control plane):**
    ```bash
-   # Connect to your Neon database
-   psql "postgresql://username:password@ep-xxx.us-east-2.aws.neon.tech/neondb?sslmode=require"
+   # Create main Neon project for catalog database
+   # This is done once and manages all tenant projects
+   psql "postgresql://username:password@ep-catalog.us-east-2.aws.neon.tech/neondb?sslmode=require"
    
-   # Run the schema
-   \i schema.sql
+   # Run the catalog schema
+   \i catalog_schema.sql
    ```
 
-3. **Verify installation:**
+3. **Create catalog schema (`catalog_schema.sql`):**
+   ```sql
+   -- Extensions
+   CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+   
+   -- Tenant project mappings
+   CREATE TABLE tenant_projects (
+       tenant_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+       tenant_name VARCHAR(255) NOT NULL,
+       tenant_email VARCHAR(255) UNIQUE NOT NULL,
+       neon_project_id VARCHAR(100) NOT NULL UNIQUE,
+       neon_database_url TEXT NOT NULL,
+       region VARCHAR(50) NOT NULL DEFAULT 'aws-us-east-1',
+       status VARCHAR(20) DEFAULT 'active',
+       created_at TIMESTAMPTZ DEFAULT NOW(),
+       updated_at TIMESTAMPTZ DEFAULT NOW()
+   );
+   
+   -- Tenant configurations
+   CREATE TABLE tenant_configs (
+       tenant_id UUID PRIMARY KEY REFERENCES tenant_projects(tenant_id) ON DELETE CASCADE,
+       settings JSONB DEFAULT '{}',
+       feature_flags JSONB DEFAULT '{}',
+       updated_at TIMESTAMPTZ DEFAULT NOW()
+   );
+   
+   -- Usage tracking for billing
+   CREATE TABLE tenant_usage (
+       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+       tenant_id UUID REFERENCES tenant_projects(tenant_id) ON DELETE CASCADE,
+       metric_name VARCHAR(100) NOT NULL,
+       metric_value DECIMAL NOT NULL,
+       period_date DATE NOT NULL,
+       created_at TIMESTAMPTZ DEFAULT NOW(),
+       UNIQUE(tenant_id, metric_name, period_date)
+   );
+   
+   -- Performance indexes
+   CREATE INDEX idx_tenant_projects_status ON tenant_projects(status);
+   CREATE INDEX idx_tenant_projects_created ON tenant_projects(created_at);
+   CREATE INDEX idx_tenant_usage_period ON tenant_usage(tenant_id, period_date);
+   ```
+
+4. **Verify catalog database:**
    ```sql
    SELECT table_name FROM information_schema.tables 
    WHERE table_schema = 'public' 
-   AND table_name IN ('tenants', 'documents', 'chunks', 'sessions', 'messages');
+   AND table_name IN ('tenant_projects', 'tenant_configs', 'tenant_usage');
    ```
+
+**Note**: Individual tenant databases are created automatically via Neon API when tenants are provisioned.
 
 #### **2.2 Neo4j Setup**
 
@@ -127,10 +203,11 @@ This guide provides step-by-step instructions for deploying the multi-tenant RAG
 
 1. **Create `.env` file:**
    ```bash
-   # Database Configuration
-   NEON_CONNECTION_STRING=postgresql://username:password@ep-xxx.us-east-2.aws.neon.tech/neondb?sslmode=require
+   # Neon Configuration (Project-per-Tenant)
+   NEON_API_KEY=your_neon_api_key_here
+   CATALOG_DATABASE_URL=postgresql://catalog_user:pass@ep-catalog.us-east-2.aws.neon.tech/neondb?sslmode=require
    
-   # Neo4j Configuration
+   # Neo4j Configuration (Shared with namespacing)
    NEO4J_URI=neo4j+s://xxx.databases.neo4j.io
    NEO4J_USER=neo4j
    NEO4J_PASSWORD=your_password
@@ -155,22 +232,23 @@ This guide provides step-by-step instructions for deploying the multi-tenant RAG
    from typing import Optional
    
    class Config:
-       # Database
-       NEON_CONNECTION_STRING = os.getenv("NEON_CONNECTION_STRING")
+       # Neon Configuration (Project-per-Tenant)
+       NEON_API_KEY = os.getenv("NEON_API_KEY")
+       CATALOG_DATABASE_URL = os.getenv("CATALOG_DATABASE_URL")
        
-       # Neo4j
+       # Neo4j Configuration (Shared with namespacing)
        NEO4J_URI = os.getenv("NEO4J_URI")
        NEO4J_USER = os.getenv("NEO4J_USER", "neo4j")
        NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD")
        
-       # JWT
+       # JWT Configuration
        JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY")
        JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
        
-       # OpenAI
+       # OpenAI Configuration
        OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
        
-       # Application
+       # Application Configuration
        APP_ENV = os.getenv("APP_ENV", "development")
        APP_HOST = os.getenv("APP_HOST", "127.0.0.1")
        APP_PORT = int(os.getenv("APP_PORT", 8000))
@@ -179,7 +257,8 @@ This guide provides step-by-step instructions for deploying the multi-tenant RAG
        @classmethod
        def validate(cls):
            required_vars = [
-               "NEON_CONNECTION_STRING",
+               "NEON_API_KEY",
+               "CATALOG_DATABASE_URL",
                "NEO4J_URI", 
                "NEO4J_PASSWORD",
                "JWT_SECRET_KEY",
@@ -213,15 +292,17 @@ logging.basicConfig(
 # Validate configuration
 config.validate()
 
-# Create FastAPI app
+# Create FastAPI app with project-per-tenant architecture
 app = create_app(
-    neon_connection_string=config.NEON_CONNECTION_STRING,
+    neon_api_key=config.NEON_API_KEY,
+    catalog_database_url=config.CATALOG_DATABASE_URL,
     neo4j_uri=config.NEO4J_URI,
     neo4j_user=config.NEO4J_USER,
     neo4j_password=config.NEO4J_PASSWORD,
     jwt_secret_key=config.JWT_SECRET_KEY,
-    title="Multi-Tenant RAG API",
-    version="1.0.0"
+    openai_api_key=config.OPENAI_API_KEY,
+    title="Multi-Tenant RAG API (Project-per-Tenant)",
+    version="2.0.0"
 )
 
 if __name__ == "__main__":

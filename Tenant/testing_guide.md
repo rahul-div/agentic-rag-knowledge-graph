@@ -2,7 +2,7 @@
 
 ## 🧪 **Overview**
 
-This comprehensive testing guide covers all aspects of validating the multi-tenant RAG system, ensuring complete tenant isolation, security, and functionality.
+This comprehensive testing guide covers all aspects of validating the multi-tenant RAG system with **project-per-tenant architecture**, ensuring complete tenant isolation, security, and functionality.
 
 ## 📋 **Testing Strategy**
 
@@ -43,8 +43,8 @@ tests/
 ├── __init__.py
 ├── conftest.py                 # Shared fixtures
 ├── unit/
-│   ├── test_tenant_manager.py
-│   ├── test_graphiti_client.py
+│   ├── test_tenant_project_manager.py
+│   ├── test_tenant_graphiti_client.py
 │   ├── test_auth_middleware.py
 │   └── test_agent.py
 ├── integration/
@@ -71,8 +71,8 @@ import asyncpg
 from unittest.mock import AsyncMock, MagicMock
 from datetime import datetime
 
-from Tenant.tenant_manager import TenantManager, Tenant, Document
-from Tenant.multi_tenant_graphiti import TenantGraphitiClient
+from Tenant.tenant_project_manager import TenantProjectManager, TenantProject
+from Tenant.tenant_graphiti_client import TenantGraphitiClient
 from Tenant.multi_tenant_agent import MultiTenantRAGAgent, TenantContext
 from Tenant.auth_middleware import JWTManager
 
@@ -97,15 +97,15 @@ async def mock_db_pool():
     return pool
 
 @pytest.fixture
-async def tenant_manager(mock_db_pool):
-    """Create tenant manager with mocked database."""
-    manager = TenantManager("mock://connection")
+async def tenant_project_manager(mock_db_pool):
+    """Create tenant project manager with mocked database."""
+    manager = TenantProjectManager("mock://connection")
     manager.pool = mock_db_pool
     return manager
 
 @pytest.fixture
 async def graphiti_client():
-    """Create mocked Graphiti client."""
+    """Create mocked shared Graphiti client."""
     client = TenantGraphitiClient("mock://neo4j", "user", "pass")
     client.graphiti = AsyncMock()
     client._initialized = True
@@ -160,24 +160,64 @@ def tenant_context():
     )
 ```
 
-#### **tests/unit/test_tenant_manager.py**
+#### **tests/unit/test_tenant_project_manager.py**
 
 ```python
 import pytest
 from unittest.mock import AsyncMock, patch
 from datetime import datetime
 
-from Tenant.tenant_manager import TenantManager, Tenant, Document, Chunk
+from Tenant.tenant_project_manager import TenantProjectManager, TenantProject
 
-class TestTenantManager:
-    """Test suite for TenantManager."""
+class TestTenantProjectManager:
+    """Test suite for TenantProjectManager."""
     
     @pytest.mark.asyncio
-    async def test_create_tenant(self, tenant_manager, mock_db_pool):
-        """Test tenant creation."""
-        # Mock database response
-        mock_row = {
-            'id': 'test_tenant',
+    async def test_create_tenant_project(self, tenant_project_manager, mock_db_pool):
+        """Test tenant project creation."""
+        # Mock Neon API response
+        mock_project = {
+            'project_id': 'proj_abc123',
+            'database_url': 'postgresql://...@ep-abc.neon.tech/neondb',
+            'tenant_id': 'test_tenant'
+        }
+        
+        with patch.object(tenant_project_manager, 'neon_api') as mock_neon:
+            mock_neon.create_project.return_value = mock_project
+            
+            result = await tenant_project_manager.create_tenant_project(
+                "Test Corp", "test@corp.com"
+            )
+            
+            assert result['project_id'] == 'proj_abc123'
+            assert 'database_url' in result
+            mock_neon.create_project.assert_called_once()
+    
+    @pytest.mark.asyncio
+    async def test_get_tenant_database_connection(self, tenant_project_manager):
+        """Test getting tenant-specific database connection."""
+        tenant_id = "test_tenant"
+        
+        result = await tenant_project_manager.get_tenant_database_url(tenant_id)
+        
+        assert result.startswith('postgresql://')
+        assert 'test_tenant' in result or 'proj_' in result
+    
+    @pytest.mark.asyncio
+    async def test_tenant_isolation(self, tenant_project_manager):
+        """Test that tenants get completely separate database projects."""
+        # Create two tenants
+        tenant_a = await tenant_project_manager.create_tenant_project(
+            "Tenant A", "a@test.com"
+        )
+        tenant_b = await tenant_project_manager.create_tenant_project(
+            "Tenant B", "b@test.com"
+        )
+        
+        # Verify they have different project IDs and database URLs
+        assert tenant_a['project_id'] != tenant_b['project_id']
+        assert tenant_a['database_url'] != tenant_b['database_url']
+```
             'name': 'Test Corp',
             'email': 'test@corp.com',
             'status': 'active',
@@ -376,68 +416,108 @@ import pytest
 from unittest.mock import AsyncMock
 
 class TestTenantIsolation:
-    """Test suite for tenant data isolation."""
+    """Test suite for tenant data isolation using project-per-tenant architecture."""
     
     @pytest.mark.asyncio
-    async def test_database_isolation(self, tenant_manager, mock_db_pool):
-        """Test that database queries are properly isolated by tenant."""
-        # Mock two different tenant responses
-        tenant_a_docs = [{'id': 'doc_a1', 'tenant_id': 'tenant_a'}]
-        tenant_b_docs = [{'id': 'doc_b1', 'tenant_id': 'tenant_b'}]
+    async def test_database_project_isolation(self, tenant_project_manager):
+        """Test that tenants get completely separate database projects."""
+        # Create two tenants
+        tenant_a = await tenant_project_manager.create_tenant_project(
+            "Tenant A", "a@test.com"
+        )
+        tenant_b = await tenant_project_manager.create_tenant_project(
+            "Tenant B", "b@test.com"
+        )
         
-        conn = mock_db_pool.acquire.return_value.__aenter__.return_value
+        # Verify complete isolation - different projects and databases
+        assert tenant_a['project_id'] != tenant_b['project_id']
+        assert tenant_a['database_url'] != tenant_b['database_url']
         
-        # First call for tenant A
-        conn.fetch.return_value = tenant_a_docs
-        docs_a = await tenant_manager.list_documents("tenant_a")
+        # Verify database URLs point to different Neon projects
+        assert '@ep-' in tenant_a['database_url']
+        assert '@ep-' in tenant_b['database_url']
+        url_a_host = tenant_a['database_url'].split('@')[1].split('/')[0]
+        url_b_host = tenant_b['database_url'].split('@')[1].split('/')[0]
+        assert url_a_host != url_b_host  # Different project endpoints
+    
+    @pytest.mark.asyncio
+    async def test_no_cross_tenant_data_access(self, tenant_project_manager):
+        """Test that tenants cannot access each other's data (impossible with separate DBs)."""
+        # Create tenant projects
+        tenant_a = await tenant_project_manager.create_tenant_project(
+            "ACME Corp", "acme@corp.com"
+        )
+        tenant_b = await tenant_project_manager.create_tenant_project(
+            "Tesla Inc", "tesla@inc.com"
+        )
         
-        # Second call for tenant B  
-        conn.fetch.return_value = tenant_b_docs
-        docs_b = await tenant_manager.list_documents("tenant_b")
+        # Get separate database connections
+        db_a = await tenant_project_manager.get_tenant_database_connection(tenant_a['tenant_id'])
+        db_b = await tenant_project_manager.get_tenant_database_connection(tenant_b['tenant_id'])
         
-        # Verify isolation
-        assert len(docs_a) == 1
-        assert docs_a[0].tenant_id == "tenant_a"
-        assert len(docs_b) == 1
-        assert docs_b[0].tenant_id == "tenant_b"
+        # Add test data to tenant A's database
+        await db_a.execute("""
+            INSERT INTO documents (id, title, content) 
+            VALUES ('acme_doc1', 'ACME Secret', 'Confidential ACME data')
+        """)
         
-        # Verify SQL calls included tenant filtering
-        assert conn.fetch.call_count == 2
-        for call in conn.fetch.call_args_list:
-            sql = call[0][0]
-            assert "tenant_id = $1" in sql
+        # Try to find ACME data from tenant B's database - should be impossible
+        results = await db_b.fetch_all("SELECT * FROM documents WHERE content LIKE '%ACME%'")
+        
+        # Verify complete isolation - tenant B cannot see tenant A's data
+        assert len(results) == 0, "Cross-tenant data leakage detected!"
     
     @pytest.mark.asyncio
     async def test_graph_namespace_isolation(self, graphiti_client):
-        """Test that graph queries are isolated by namespace."""
+        """Test that graph queries are isolated by namespace using group_id."""
         # Mock different results for different tenants
-        tenant_a_results = [{"entity": "A Entity"}]
-        tenant_b_results = [{"entity": "B Entity"}]
+        tenant_a_results = [{"entity": "ACME Entity", "namespace": "tenant_acme"}]
+        tenant_b_results = [{"entity": "Tesla Entity", "namespace": "tenant_tesla"}]
         
         # Test tenant A search
         graphiti_client.graphiti.search.return_value = tenant_a_results
-        results_a = await graphiti_client.search_tenant_graph("tenant_a", "test")
+        results_a = await graphiti_client.search_for_tenant("acme", "test query")
         
         # Test tenant B search
         graphiti_client.graphiti.search.return_value = tenant_b_results
-        results_b = await graphiti_client.search_tenant_graph("tenant_b", "test")
+        results_b = await graphiti_client.search_for_tenant("tesla", "test query")
         
         # Verify different namespaces were used
         assert len(results_a) == 1
-        assert results_a[0]['namespace'] == 'tenant_tenant_a'
+        assert results_a[0]['namespace'] == 'tenant_acme'
         assert len(results_b) == 1
-        assert results_b[0]['namespace'] == 'tenant_tenant_b'
+        assert results_b[0]['namespace'] == 'tenant_tesla'
         
-        # Verify search calls used correct namespaces
+        # Verify search calls used correct group_id for isolation
         calls = graphiti_client.graphiti.search.call_args_list
-        assert calls[0].kwargs['group_id'] == 'tenant_tenant_a'
-        assert calls[1].kwargs['group_id'] == 'tenant_tenant_b'
+        assert calls[0].kwargs['group_id'] == 'acme'
+        assert calls[1].kwargs['group_id'] == 'tesla'
     
     @pytest.mark.asyncio
-    async def test_cross_tenant_data_leakage_prevention(self, rag_agent):
-        """Test that one tenant cannot access another tenant's data."""
-        # Create contexts for different tenants
-        context_a = TenantContext(tenant_id="tenant_a", permissions=["read"])
+    async def test_tenant_agent_dependencies_isolation(self, tenant_project_manager, graphiti_client):
+        """Test that agent dependencies are properly isolated per tenant."""
+        from Tenant.multi_tenant_agent import TenantAgentDependencies
+        
+        # Create dependencies for two different tenants
+        deps_a = await TenantAgentDependencies.create_for_tenant(
+            tenant_id="acme",
+            tenant_manager=tenant_project_manager,
+            shared_graphiti_client=graphiti_client
+        )
+        
+        deps_b = await TenantAgentDependencies.create_for_tenant(
+            tenant_id="tesla",
+            tenant_manager=tenant_project_manager,
+            shared_graphiti_client=graphiti_client
+        )
+        
+        # Verify each tenant has their own database connection
+        assert deps_a.tenant_database != deps_b.tenant_database
+        assert deps_a.tenant_id != deps_b.tenant_id
+        
+        # Verify they share the same Graphiti client (with namespace isolation)
+        assert deps_a.shared_graphiti is deps_b.shared_graphiti
+```
         context_b = TenantContext(tenant_id="tenant_b", permissions=["read"])
         
         # Mock search results

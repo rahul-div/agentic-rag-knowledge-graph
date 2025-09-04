@@ -54,9 +54,7 @@ class GraphitiClient:
             raise ValueError("GOOGLE_API_KEY or GEMINI_API_KEY must be set")
 
         # Model configuration from environment variables
-        self.llm_model = os.getenv(
-            "GEMINI_CHAT_MODEL", "gemini-1.5-flash"
-        )
+        self.llm_model = os.getenv("GEMINI_CHAT_MODEL", "gemini-1.5-flash")
         self.embedding_model = os.getenv("GEMINI_EMBEDDING_MODEL", "text-embedding-004")
 
         self.graphiti: Optional[Graphiti] = None
@@ -174,7 +172,7 @@ class GraphitiClient:
             source: Source of the content
             timestamp: Episode timestamp
             metadata: Additional metadata (will be sanitized for Neo4j)
-            group_id: Group identifier for namespacing
+            group_id: Group identifier for namespacing (CRITICAL for multi-tenancy)
         """
         if not self._initialized:
             await self.initialize()
@@ -185,17 +183,24 @@ class GraphitiClient:
         from graphiti_core.nodes import EpisodeType
 
         try:
-            # Add episode with default Gemini-powered entity extraction
+            # Add episode with proper group_id for tenant isolation
             await self.graphiti.add_episode(
                 name=episode_id,
                 episode_body=content,
                 source=EpisodeType.text,
                 source_description=source,
                 reference_time=episode_timestamp,
+                group_id=group_id,  # ✅ FIXED: Include group_id for tenant isolation
             )
-            logger.info(
-                f"Added episode {episode_id} with Gemini-powered entity extraction to knowledge graph"
-            )
+
+            if group_id:
+                logger.info(
+                    f"Added episode {episode_id} to knowledge graph with namespace {group_id}"
+                )
+            else:
+                logger.info(
+                    f"Added episode {episode_id} to knowledge graph (no namespace)"
+                )
 
         except Exception as e:
             logger.error(f"Failed to add episode {episode_id}: {e}")
@@ -207,14 +212,16 @@ class GraphitiClient:
                 logger.warning(
                     "Graphiti is trying to store complex structures (like summaries) as Neo4j properties"
                 )
-                logger.warning(
-                    "Skipping this episode and continuing with ingestion..."
-                )
+                logger.warning("Skipping this episode and continuing with ingestion...")
                 return  # Continue processing instead of raising
             raise
 
     async def search(
-        self, query: str, center_node_distance: int = 2, use_hybrid_search: bool = True
+        self,
+        query: str,
+        center_node_distance: int = 2,
+        use_hybrid_search: bool = True,
+        group_id: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """
         Search the knowledge graph.
@@ -223,6 +230,7 @@ class GraphitiClient:
             query: Search query
             center_node_distance: Distance from center nodes
             use_hybrid_search: Whether to use hybrid search
+            group_id: Group identifier for namespace filtering (CRITICAL for multi-tenancy)
 
         Returns:
             Search results
@@ -231,8 +239,17 @@ class GraphitiClient:
             await self.initialize()
 
         try:
-            # Use Graphiti's search method (simplified parameters)
-            results = await self.graphiti.search(query)
+            # Use Graphiti's search method with group_id for tenant isolation
+            results = await self.graphiti.search(query, group_id=group_id)
+
+            if group_id:
+                logger.info(
+                    f"Graph search in namespace {group_id} returned {len(results)} results"
+                )
+            else:
+                logger.info(
+                    f"Graph search (all namespaces) returned {len(results)} results"
+                )
 
             # Convert results to dictionaries
             return [
@@ -261,6 +278,7 @@ class GraphitiClient:
         entity_name: str,
         relationship_types: Optional[List[str]] = None,
         depth: int = 1,
+        group_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Get entities related to a given entity using Graphiti search.
@@ -269,6 +287,7 @@ class GraphitiClient:
             entity_name: Name of the entity
             relationship_types: Types of relationships to follow (not used with Graphiti)
             depth: Maximum depth to traverse (not used with Graphiti)
+            group_id: Group identifier for namespace filtering (CRITICAL for multi-tenancy)
 
         Returns:
             Related entities and relationships
@@ -277,7 +296,10 @@ class GraphitiClient:
             await self.initialize()
 
         # Use Graphiti search to find related information about the entity
-        results = await self.graphiti.search(f"relationships involving {entity_name}")
+        results = await self.graphiti.search(
+            f"relationships involving {entity_name}",
+            group_id=group_id,  # ✅ FIXED: Include group_id for tenant isolation
+        )
 
         # Extract entity information from the search results
         related_entities = set()
@@ -499,3 +521,197 @@ async def test_graph_connection() -> bool:
     except Exception as e:
         logger.error(f"Graph connection test failed: {e}")
         return False
+
+
+class TenantGraphitiClient:
+    """
+    Multi-tenant wrapper for GraphitiClient following official Graphiti patterns.
+
+    This class provides tenant-aware methods that automatically apply group_id
+    namespacing according to official Graphiti documentation.
+    """
+
+    def __init__(self, graphiti_client: GraphitiClient):
+        """
+        Initialize with a shared GraphitiClient instance.
+
+        Args:
+            graphiti_client: Shared GraphitiClient instance for all tenants
+        """
+        self.graphiti_client = graphiti_client
+
+    def _get_tenant_namespace(self, tenant_id: str) -> str:
+        """
+        Generate tenant namespace following official Graphiti convention.
+
+        Args:
+            tenant_id: Tenant identifier
+
+        Returns:
+            Namespace string in format "tenant_{tenant_id}"
+        """
+        return f"tenant_{tenant_id}"
+
+    async def add_episode_for_tenant(
+        self,
+        tenant_id: str,
+        episode_id: str,
+        content: str,
+        source: str,
+        timestamp: Optional[datetime] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """
+        Add episode to tenant's namespace.
+
+        Args:
+            tenant_id: Tenant identifier
+            episode_id: Unique episode identifier
+            content: Episode content
+            source: Source of the content
+            timestamp: Episode timestamp
+            metadata: Additional metadata
+        """
+        namespace = self._get_tenant_namespace(tenant_id)
+
+        await self.graphiti_client.add_episode(
+            episode_id=episode_id,
+            content=content,
+            source=source,
+            timestamp=timestamp,
+            metadata=metadata,
+            group_id=namespace,  # Apply tenant namespace
+        )
+
+        logger.info(
+            f"Added episode {episode_id} for tenant {tenant_id} (namespace: {namespace})"
+        )
+
+    async def search_for_tenant(
+        self,
+        tenant_id: str,
+        query: str,
+        center_node_distance: int = 2,
+        use_hybrid_search: bool = True,
+    ) -> List[Dict[str, Any]]:
+        """
+        Search within tenant's namespace.
+
+        Args:
+            tenant_id: Tenant identifier
+            query: Search query
+            center_node_distance: Distance from center nodes
+            use_hybrid_search: Whether to use hybrid search
+
+        Returns:
+            Search results from tenant's namespace only
+        """
+        namespace = self._get_tenant_namespace(tenant_id)
+
+        results = await self.graphiti_client.search(
+            query=query,
+            center_node_distance=center_node_distance,
+            use_hybrid_search=use_hybrid_search,
+            group_id=namespace,  # Filter to tenant namespace
+        )
+
+        logger.info(
+            f"Search for tenant {tenant_id} (namespace: {namespace}) returned {len(results)} results"
+        )
+        return results
+
+    async def get_related_entities_for_tenant(
+        self,
+        tenant_id: str,
+        entity_name: str,
+        relationship_types: Optional[List[str]] = None,
+        depth: int = 1,
+    ) -> Dict[str, Any]:
+        """
+        Get related entities within tenant's namespace.
+
+        Args:
+            tenant_id: Tenant identifier
+            entity_name: Name of the entity
+            relationship_types: Types of relationships to follow
+            depth: Maximum depth to traverse
+
+        Returns:
+            Related entities and relationships from tenant's namespace
+        """
+        namespace = self._get_tenant_namespace(tenant_id)
+
+        return await self.graphiti_client.get_related_entities(
+            entity_name=entity_name,
+            relationship_types=relationship_types,
+            depth=depth,
+            group_id=namespace,  # Filter to tenant namespace
+        )
+
+    async def add_manual_fact_for_tenant(
+        self,
+        tenant_id: str,
+        source_entity: str,
+        target_entity: str,
+        relationship: str,
+        fact: str,
+    ) -> None:
+        """
+        Add manual fact triplet to tenant's namespace.
+
+        Args:
+            tenant_id: Tenant identifier
+            source_entity: Source entity name
+            target_entity: Target entity name
+            relationship: Relationship type
+            fact: Fact description
+        """
+        namespace = self._get_tenant_namespace(tenant_id)
+
+        # Import required classes
+        from graphiti_core.nodes import EntityNode
+        from graphiti_core.edges import EntityEdge
+        import uuid
+
+        # Create source node with tenant namespace
+        source_node = EntityNode(
+            uuid=str(uuid.uuid4()),
+            name=source_entity,
+            group_id=namespace,  # Apply tenant namespace
+        )
+
+        # Create target node with tenant namespace
+        target_node = EntityNode(
+            uuid=str(uuid.uuid4()),
+            name=target_entity,
+            group_id=namespace,  # Apply tenant namespace
+        )
+
+        # Create edge with tenant namespace
+        edge = EntityEdge(
+            group_id=namespace,  # Apply tenant namespace
+            source_node_uuid=source_node.uuid,
+            target_node_uuid=target_node.uuid,
+            created_at=datetime.now(timezone.utc),
+            name=relationship,
+            fact=fact,
+        )
+
+        # Add triplet to the graph
+        if not self.graphiti_client._initialized:
+            await self.graphiti_client.initialize()
+
+        await self.graphiti_client.graphiti.add_triplet(source_node, edge, target_node)
+
+        logger.info(
+            f"Added manual fact for tenant {tenant_id} (namespace: {namespace}): "
+            f"{source_entity} -> {relationship} -> {target_entity}"
+        )
+
+    async def initialize(self):
+        """Initialize the underlying GraphitiClient."""
+        await self.graphiti_client.initialize()
+
+    async def close(self):
+        """Close the underlying GraphitiClient."""
+        await self.graphiti_client.close()

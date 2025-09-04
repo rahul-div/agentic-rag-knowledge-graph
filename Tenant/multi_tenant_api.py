@@ -1,6 +1,6 @@
 """
-Multi-Tenant FastAPI with JWT Authentication and Tenant Isolation
-Provides RESTful endpoints for the multi-tenant RAG system.
+Multi-Tenant FastAPI with JWT Authentication and Project-per-Tenant Isolation
+Provides RESTful endpoints for the multi-tenant RAG system using official Neon best practices.
 """
 
 import logging
@@ -9,11 +9,11 @@ from datetime import datetime, timedelta
 from contextlib import asynccontextmanager
 
 try:
-    from fastapi import FastAPI, HTTPException, Depends, status
+    from fastapi import FastAPI, HTTPException, Depends, status, Request
     from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
     from fastapi.middleware.cors import CORSMiddleware
     from pydantic import BaseModel, Field
-    from jose import jwt  # python-jose for JWT handling
+    from jose import jwt, JWTError
 except ImportError:
     print(
         "Warning: FastAPI dependencies not installed. Install with: pip install fastapi uvicorn[standard] python-jose[cryptography]"
@@ -68,51 +68,70 @@ except ImportError:
             "HTTP_500_INTERNAL_SERVER_ERROR": 500,
         },
     )()
+
     jwt = type(
         "JWT",
         (),
         {
             "encode": lambda *args, **kwargs: "mock_token",
             "decode": lambda *args, **kwargs: {"tenant_id": "mock"},
-            "PyJWTError": Exception,
+            "JWTError": Exception,
         },
     )()
 
-from .tenant_manager import TenantManager, Document
-from .multi_tenant_graphiti import TenantGraphitiClient
-from .multi_tenant_agent import MultiTenantRAGAgent, TenantContext
+    JWTError = Exception
+
+from tenant_manager import TenantManager
+from tenant_graphiti_client import TenantGraphitiClient
+from multi_tenant_agent import MultiTenantRAGAgent, TenantContext
+
+
+# Document model for tenant operations (defined here for direct script execution)
+class Document(BaseModel):
+    """Document model for tenant operations."""
+
+    id: Optional[str] = None
+    title: str
+    source: str
+    content: str
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
 
 logger = logging.getLogger(__name__)
 
-# Pydantic Models
+# Pydantic Models for API
 
 
-class TenantCreate(BaseModel):
+class TenantCreateRequest(BaseModel):
     """Model for creating a new tenant."""
 
-    id: str = Field(..., description="Unique tenant identifier")
     name: str = Field(..., description="Tenant name")
     email: str = Field(..., description="Tenant email")
+    region: str = Field("aws-us-east-1", description="Neon region")
+    plan: str = Field("basic", description="Tenant plan")
     max_documents: int = Field(1000, description="Maximum documents allowed")
     max_storage_mb: int = Field(500, description="Maximum storage in MB")
-    metadata: Optional[Dict[str, Any]] = Field(None, description="Additional metadata")
 
 
 class TenantResponse(BaseModel):
-    """Model for tenant response."""
+    """Model for tenant information."""
 
     id: str
     name: str
     email: str
+    neon_project_id: str
+    region: str
     status: str
+    plan: str
     max_documents: int
     max_storage_mb: int
-    metadata: Dict[str, Any]
     created_at: datetime
     updated_at: datetime
 
 
-class DocumentCreate(BaseModel):
+class DocumentCreateRequest(BaseModel):
     """Model for creating a document."""
 
     title: str = Field(..., description="Document title")
@@ -122,287 +141,267 @@ class DocumentCreate(BaseModel):
 
 
 class DocumentResponse(BaseModel):
-    """Model for document response."""
+    """Model for document information."""
 
     id: str
-    tenant_id: str
     title: str
     source: str
     content: str
     metadata: Dict[str, Any]
     created_at: datetime
-    updated_at: datetime
+    updated_at: Optional[datetime] = None
 
 
 class QueryRequest(BaseModel):
-    """Model for query requests."""
+    """Model for RAG queries."""
 
-    query: str = Field(..., description="Search query")
+    query: str = Field(..., description="Query text")
     use_vector: bool = Field(True, description="Use vector search")
     use_graph: bool = Field(True, description="Use graph search")
-    max_results: int = Field(10, description="Maximum results to return")
+    max_results: int = Field(10, description="Maximum results")
+    context: Optional[Dict[str, Any]] = Field(None, description="Additional context")
 
 
 class QueryResponse(BaseModel):
     """Model for query responses."""
 
-    query: str
     response: str
     tenant_id: str
-    sources: List[str]
-    timestamp: datetime
+    timestamp: str
+    metadata: Dict[str, Any]
 
 
-class SearchRequest(BaseModel):
-    """Model for search requests."""
-
-    query: str = Field(..., description="Search query")
-    search_type: str = Field(
-        "hybrid", description="Type of search: vector, graph, or hybrid"
-    )
-    limit: int = Field(10, description="Maximum results")
-    threshold: float = Field(0.7, description="Similarity threshold for vector search")
-
-
-class RelationshipCreate(BaseModel):
+class RelationshipRequest(BaseModel):
     """Model for creating relationships."""
 
     source_entity: str = Field(..., description="Source entity name")
     target_entity: str = Field(..., description="Target entity name")
-    relationship_type: str = Field(..., description="Type of relationship")
-    description: str = Field(..., description="Description of relationship")
+    relationship_type: str = Field(..., description="Relationship type")
+    description: Optional[str] = Field(None, description="Relationship description")
 
 
-class AuthToken(BaseModel):
-    """Model for authentication tokens."""
+class HealthResponse(BaseModel):
+    """Model for health check response."""
 
-    access_token: str
-    token_type: str = "bearer"
-    expires_in: int
+    status: str
+    timestamp: str
+    version: str
+    tenant_count: int
+    database_status: str
+    graph_status: str
 
 
-class TokenPayload(BaseModel):
-    """Model for JWT token payload."""
+class StatsResponse(BaseModel):
+    """Model for tenant statistics."""
 
     tenant_id: str
-    user_id: Optional[str] = None
-    permissions: List[str] = Field(default_factory=lambda: ["read"])
-    exp: Optional[int] = None
+    documents: int
+    chunks: int
+    graph_entities: int
+    graph_relationships: int
+    timestamp: str
 
 
-# Authentication and Authorization
+# Security
+security = HTTPBearer()
 
 
-class TenantAuth:
-    """JWT-based tenant authentication."""
+class JWTManager:
+    """JWT token management for tenant authentication."""
 
     def __init__(self, secret_key: str, algorithm: str = "HS256"):
         self.secret_key = secret_key
         self.algorithm = algorithm
-        self.security = HTTPBearer()
 
-    def create_access_token(
-        self,
-        tenant_id: str,
-        user_id: Optional[str] = None,
-        permissions: List[str] = None,
-        expires_delta: Optional[timedelta] = None,
-    ) -> str:
-        """Create JWT access token."""
-        if expires_delta:
-            expire = datetime.utcnow() + expires_delta
-        else:
-            expire = datetime.utcnow() + timedelta(hours=24)
-
-        to_encode = {
+    def create_token(self, tenant_id: str, user_id: Optional[str] = None) -> str:
+        """Create JWT token with tenant context."""
+        payload = {
             "tenant_id": tenant_id,
             "user_id": user_id,
-            "permissions": permissions or ["read"],
-            "exp": expire,
+            "iat": datetime.utcnow(),
+            "exp": datetime.utcnow() + timedelta(hours=24),
         }
+        return jwt.encode(payload, self.secret_key, algorithm=self.algorithm)
 
-        encoded_jwt = jwt.encode(to_encode, self.secret_key, algorithm=self.algorithm)
-        return encoded_jwt
-
-    async def get_current_tenant(
-        self, credentials: HTTPAuthorizationCredentials = Depends(HTTPBearer())
-    ) -> TenantContext:
-        """Extract tenant context from JWT token."""
+    def verify_token(self, token: str) -> Dict[str, Any]:
+        """Verify and decode JWT token."""
         try:
-            payload = jwt.decode(
-                credentials.credentials, self.secret_key, algorithms=[self.algorithm]
+            payload = jwt.decode(token, self.secret_key, algorithms=[self.algorithm])
+            return payload
+        except JWTError:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token"
             )
 
-            tenant_id = payload.get("tenant_id")
-            if tenant_id is None:
-                raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail="Invalid authentication credentials",
-                )
 
-            return TenantContext(
-                tenant_id=tenant_id,
-                user_id=payload.get("user_id"),
-                permissions=payload.get("permissions", ["read"]),
-                metadata=payload.get("metadata", {}),
-            )
+# Global variables (will be set in create_app)
+tenant_manager: Optional[TenantManager] = None
+jwt_manager: Optional[JWTManager] = None
+rag_agent: Optional[MultiTenantRAGAgent] = None
 
-        except jwt.PyJWTError:
+
+async def get_current_tenant(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+) -> TenantContext:
+    """Extract tenant context from JWT token."""
+    try:
+        payload = jwt_manager.verify_token(credentials.credentials)
+        tenant_id = payload.get("tenant_id")
+        user_id = payload.get("user_id")
+
+        if not tenant_id:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid authentication credentials",
+                detail="Invalid token: missing tenant_id",
             )
 
+        # Verify tenant exists
+        tenant = await tenant_manager.get_tenant(tenant_id)
+        if not tenant:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Tenant not found"
+            )
 
-# Application Factory
+        if tenant.status != "active":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN, detail="Tenant is not active"
+            )
 
+        return TenantContext(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            permissions=["read", "write"],  # Simplified permissions
+        )
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """Application lifespan manager."""
-    # Startup
-    logger.info("Starting multi-tenant RAG API")
-
-    # Initialize components
-    tenant_manager = app.state.tenant_manager
-    graphiti_client = app.state.graphiti_client
-
-    await tenant_manager.initialize()
-    await graphiti_client.initialize()
-
-    # Initialize agent
-    app.state.rag_agent = MultiTenantRAGAgent(tenant_manager, graphiti_client)
-    await app.state.rag_agent.initialize()
-
-    logger.info("Multi-tenant RAG API started successfully")
-
-    yield
-
-    # Shutdown
-    logger.info("Shutting down multi-tenant RAG API")
-    await app.state.rag_agent.close()
-    logger.info("Multi-tenant RAG API shutdown complete")
+    except JWTError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token"
+        )
 
 
 def create_app(
-    neon_connection_string: str,
+    neon_api_key: str,
+    catalog_database_url: str,
     neo4j_uri: str,
     neo4j_user: str,
     neo4j_password: str,
     jwt_secret_key: str,
+    openai_api_key: str,
+    default_region: str = "aws-us-east-1",
     title: str = "Multi-Tenant RAG API",
-    version: str = "1.0.0",
+    version: str = "2.0.0",
+    description: str = "Multi-tenant RAG system with project-per-tenant architecture",
 ) -> FastAPI:
-    """Create FastAPI application with multi-tenant configuration."""
+    """Create FastAPI application with project-per-tenant architecture."""
 
+    global tenant_manager, jwt_manager, rag_agent
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        """Application lifespan management."""
+        # Initialize components
+        global tenant_manager, jwt_manager, rag_agent
+
+        # Initialize tenant manager
+        tenant_manager = TenantManager(
+            neon_api_key=neon_api_key,
+            catalog_database_url=catalog_database_url,
+            default_region=default_region,
+        )
+        await tenant_manager.initialize()
+
+        # Initialize Graphiti client
+        graphiti_client = TenantGraphitiClient(
+            neo4j_uri=neo4j_uri, neo4j_user=neo4j_user, neo4j_password=neo4j_password
+        )
+        await graphiti_client.initialize()
+
+        # Initialize RAG agent
+        rag_agent = MultiTenantRAGAgent(
+            tenant_manager=tenant_manager,
+            graphiti_client=graphiti_client,
+            model_name="gpt-4",
+        )
+
+        # Initialize JWT manager
+        jwt_manager = JWTManager(secret_key=jwt_secret_key)
+
+        logger.info("Multi-tenant RAG API started successfully")
+        yield
+
+        # Cleanup
+        await tenant_manager.close()
+        await graphiti_client.close()
+        logger.info("Multi-tenant RAG API shutdown complete")
+
+    # Create FastAPI app
     app = FastAPI(
-        title=title,
-        version=version,
-        description="Multi-tenant RAG system with complete data isolation",
-        lifespan=lifespan,
+        title=title, version=version, description=description, lifespan=lifespan
     )
 
     # Add CORS middleware
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],  # Configure appropriately for production
+        allow_origins=["*"],
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
     )
 
-    # Initialize components
-    app.state.tenant_manager = TenantManager(neon_connection_string)
-    app.state.graphiti_client = TenantGraphitiClient(
-        neo4j_uri, neo4j_user, neo4j_password
-    )
-    app.state.auth = TenantAuth(jwt_secret_key)
-
-    # Routes
-
-    @app.get("/health")
+    # Health check endpoint
+    @app.get("/health", response_model=HealthResponse)
     async def health_check():
         """Health check endpoint."""
         try:
-            # Check database health
-            db_health = await app.state.tenant_manager.health_check()
+            # Check tenant count
+            tenants = await tenant_manager.list_tenants(limit=1)
+            tenant_count = len(tenants)
 
-            return {
-                "status": "healthy",
-                "timestamp": datetime.utcnow().isoformat(),
-                "version": version,
-                "database": db_health,
-                "components": {
-                    "tenant_manager": bool(app.state.tenant_manager.pool),
-                    "graphiti_client": app.state.graphiti_client._initialized,
-                    "rag_agent": hasattr(app.state, "rag_agent"),
-                },
-            }
+            return HealthResponse(
+                status="healthy",
+                timestamp=datetime.now().isoformat(),
+                version=version,
+                tenant_count=tenant_count,
+                database_status="connected",
+                graph_status="connected",
+            )
         except Exception as e:
-            return {
-                "status": "unhealthy",
-                "error": str(e),
-                "timestamp": datetime.utcnow().isoformat(),
-            }
-
-    # Authentication Routes
-
-    @app.post("/auth/token", response_model=AuthToken)
-    async def create_token(tenant_id: str, user_id: Optional[str] = None):
-        """Create authentication token for tenant."""
-        try:
-            # Verify tenant exists
-            tenant = await app.state.tenant_manager.get_tenant(tenant_id)
-            if not tenant:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND, detail="Tenant not found"
-                )
-
-            # Create token
-            access_token = app.state.auth.create_access_token(
-                tenant_id=tenant_id,
-                user_id=user_id,
-                permissions=["read", "write"],  # Default permissions
+            logger.error(f"Health check failed: {e}")
+            return HealthResponse(
+                status="unhealthy",
+                timestamp=datetime.now().isoformat(),
+                version=version,
+                tenant_count=0,
+                database_status="error",
+                graph_status="error",
             )
 
-            return AuthToken(
-                access_token=access_token,
-                token_type="bearer",
-                expires_in=86400,  # 24 hours
-            )
-
-        except HTTPException:
-            raise
-        except Exception as e:
-            logger.error(f"Failed to create token: {e}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to create authentication token",
-            )
-
-    # Tenant Management Routes
+    # Tenant Management Endpoints
 
     @app.post("/tenants", response_model=TenantResponse)
-    async def create_tenant(tenant_data: TenantCreate):
-        """Create a new tenant."""
+    async def create_tenant(request: TenantCreateRequest):
+        """Create new tenant with dedicated Neon project."""
         try:
-            tenant = await app.state.tenant_manager.create_tenant(
-                tenant_id=tenant_data.id,
-                name=tenant_data.name,
-                email=tenant_data.email,
-                max_documents=tenant_data.max_documents,
-                max_storage_mb=tenant_data.max_storage_mb,
-                metadata=tenant_data.metadata or {},
+            tenant_id = await tenant_manager.create_tenant(
+                name=request.name,
+                email=request.email,
+                region=request.region,
+                plan=request.plan,
+                max_documents=request.max_documents,
+                max_storage_mb=request.max_storage_mb,
             )
 
+            tenant = await tenant_manager.get_tenant(tenant_id)
             return TenantResponse(
                 id=tenant.id,
                 name=tenant.name,
                 email=tenant.email,
+                neon_project_id=tenant.neon_project_id,
+                region=tenant.region,
                 status=tenant.status,
+                plan=tenant.plan,
                 max_documents=tenant.max_documents,
                 max_storage_mb=tenant.max_storage_mb,
-                metadata=tenant.metadata,
                 created_at=tenant.created_at,
                 updated_at=tenant.updated_at,
             )
@@ -417,24 +416,30 @@ def create_app(
             )
 
     @app.get("/tenants", response_model=List[TenantResponse])
-    async def list_tenants(status_filter: Optional[str] = None):
-        """List all tenants."""
+    async def list_tenants(
+        status_filter: Optional[str] = None, limit: int = 100, offset: int = 0
+    ):
+        """List tenants."""
         try:
-            tenants = await app.state.tenant_manager.list_tenants(status_filter)
+            tenants = await tenant_manager.list_tenants(
+                status=status_filter, limit=limit, offset=offset
+            )
 
             return [
                 TenantResponse(
-                    id=t.id,
-                    name=t.name,
-                    email=t.email,
-                    status=t.status,
-                    max_documents=t.max_documents,
-                    max_storage_mb=t.max_storage_mb,
-                    metadata=t.metadata,
-                    created_at=t.created_at,
-                    updated_at=t.updated_at,
+                    id=tenant.id,
+                    name=tenant.name,
+                    email=tenant.email,
+                    neon_project_id=tenant.neon_project_id,
+                    region=tenant.region,
+                    status=tenant.status,
+                    plan=tenant.plan,
+                    max_documents=tenant.max_documents,
+                    max_storage_mb=tenant.max_storage_mb,
+                    created_at=tenant.created_at,
+                    updated_at=tenant.updated_at,
                 )
-                for t in tenants
+                for tenant in tenants
             ]
 
         except Exception as e:
@@ -448,7 +453,7 @@ def create_app(
     async def get_tenant(tenant_id: str):
         """Get tenant by ID."""
         try:
-            tenant = await app.state.tenant_manager.get_tenant(tenant_id)
+            tenant = await tenant_manager.get_tenant(tenant_id)
             if not tenant:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND, detail="Tenant not found"
@@ -458,16 +463,16 @@ def create_app(
                 id=tenant.id,
                 name=tenant.name,
                 email=tenant.email,
+                neon_project_id=tenant.neon_project_id,
+                region=tenant.region,
                 status=tenant.status,
+                plan=tenant.plan,
                 max_documents=tenant.max_documents,
                 max_storage_mb=tenant.max_storage_mb,
-                metadata=tenant.metadata,
                 created_at=tenant.created_at,
                 updated_at=tenant.updated_at,
             )
 
-        except HTTPException:
-            raise
         except Exception as e:
             logger.error(f"Failed to get tenant {tenant_id}: {e}")
             raise HTTPException(
@@ -477,18 +482,15 @@ def create_app(
 
     @app.delete("/tenants/{tenant_id}")
     async def delete_tenant(tenant_id: str, force: bool = False):
-        """Delete a tenant."""
+        """Delete tenant and their Neon project."""
         try:
-            success = await app.state.tenant_manager.delete_tenant(
-                tenant_id, force=force
-            )
-            if not success:
+            success = await tenant_manager.delete_tenant(tenant_id, force=force)
+            if success:
+                return {"message": f"Tenant {tenant_id} deleted successfully"}
+            else:
                 raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Failed to delete tenant. Use force=true if tenant has data.",
+                    status_code=status.HTTP_404_NOT_FOUND, detail="Tenant not found"
                 )
-
-            return {"message": f"Tenant {tenant_id} deleted successfully"}
 
         except ValueError as e:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
@@ -499,95 +501,79 @@ def create_app(
                 detail="Failed to delete tenant",
             )
 
-    # Document Management Routes
+    # Authentication Endpoints
 
-    @app.post("/documents", response_model=Dict[str, Any])
-    async def create_document(
-        document_data: DocumentCreate,
-        tenant_context: TenantContext = Depends(app.state.auth.get_current_tenant),
-    ):
-        """Create a new document."""
+    @app.post("/auth/token")
+    async def create_auth_token(tenant_id: str, user_id: Optional[str] = None):
+        """Create authentication token for tenant."""
         try:
-            # Check permissions
-            if "write" not in tenant_context.permissions:
+            # Verify tenant exists
+            tenant = await tenant_manager.get_tenant(tenant_id)
+            if not tenant:
                 raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Insufficient permissions to create documents",
+                    status_code=status.HTTP_404_NOT_FOUND, detail="Tenant not found"
                 )
 
-            document = Document(
-                tenant_id=tenant_context.tenant_id,
-                title=document_data.title,
-                source=document_data.source,
-                content=document_data.content,
-                metadata=document_data.metadata or {},
-            )
+            token = jwt_manager.create_token(tenant_id, user_id)
+            return {"access_token": token, "token_type": "bearer"}
 
-            # Ingest document using the RAG agent
-            results = await app.state.rag_agent.ingest_document(document)
-
-            return {
-                "message": "Document created successfully",
-                "document_id": results["document_id"],
-                "chunk_count": results["chunk_count"],
-                "graph_added": results["graph_added"],
-                "tenant_id": tenant_context.tenant_id,
-            }
-
-        except HTTPException:
-            raise
         except Exception as e:
-            logger.error(
-                f"Failed to create document for tenant {tenant_context.tenant_id}: {e}"
+            logger.error(f"Failed to create token for tenant {tenant_id}: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to create token",
             )
+
+    # Document Management Endpoints
+
+    @app.post("/documents", response_model=DocumentResponse)
+    async def create_document(
+        request: DocumentCreateRequest,
+        tenant_context: TenantContext = Depends(get_current_tenant),
+    ):
+        """Create and ingest document into tenant's dedicated database."""
+        try:
+            document = Document(
+                title=request.title,
+                source=request.source,
+                content=request.content,
+                metadata=request.metadata or {},
+            )
+
+            # Ingest through RAG agent (handles both database and graph)
+            await rag_agent.ingest_document(
+                tenant_context=tenant_context, document=document
+            )
+
+            # Get the created document
+            created_doc = await tenant_manager.get_document(
+                tenant_context.tenant_id, document.id
+            )
+
+            return DocumentResponse(
+                id=created_doc.id,
+                title=created_doc.title,
+                source=created_doc.source,
+                content=created_doc.content,
+                metadata=created_doc.metadata,
+                created_at=created_doc.created_at,
+                updated_at=created_doc.updated_at,
+            )
+
+        except Exception as e:
+            logger.error(f"Failed to create document: {e}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Failed to create document",
             )
 
-    @app.get("/documents", response_model=List[DocumentResponse])
-    async def list_documents(
-        limit: int = 100,
-        offset: int = 0,
-        tenant_context: TenantContext = Depends(app.state.auth.get_current_tenant),
-    ):
-        """List documents for current tenant."""
-        try:
-            documents = await app.state.tenant_manager.list_documents(
-                tenant_context.tenant_id, limit, offset
-            )
-
-            return [
-                DocumentResponse(
-                    id=d.id,
-                    tenant_id=d.tenant_id,
-                    title=d.title,
-                    source=d.source,
-                    content=d.content,
-                    metadata=d.metadata,
-                    created_at=d.created_at,
-                    updated_at=d.updated_at,
-                )
-                for d in documents
-            ]
-
-        except Exception as e:
-            logger.error(
-                f"Failed to list documents for tenant {tenant_context.tenant_id}: {e}"
-            )
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to list documents",
-            )
-
     @app.get("/documents/{document_id}", response_model=DocumentResponse)
     async def get_document(
-        document_id: str,
-        tenant_context: TenantContext = Depends(app.state.auth.get_current_tenant),
+        document_id: str, tenant_context: TenantContext = Depends(get_current_tenant)
     ):
-        """Get document by ID."""
+        """Get document from tenant's dedicated database."""
         try:
-            document = await app.state.tenant_manager.get_document(
+            document = await tenant_manager.get_document(
                 tenant_context.tenant_id, document_id
             )
 
@@ -598,7 +584,6 @@ def create_app(
 
             return DocumentResponse(
                 id=document.id,
-                tenant_id=document.tenant_id,
                 title=document.title,
                 source=document.source,
                 content=document.content,
@@ -607,46 +592,37 @@ def create_app(
                 updated_at=document.updated_at,
             )
 
-        except HTTPException:
-            raise
         except Exception as e:
-            logger.error(
-                f"Failed to get document {document_id} for tenant {tenant_context.tenant_id}: {e}"
-            )
+            logger.error(f"Failed to get document {document_id}: {e}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Failed to get document",
             )
 
-    # RAG and Search Routes
+    # RAG Operation Endpoints
 
     @app.post("/query", response_model=QueryResponse)
-    async def query_rag(
-        query_request: QueryRequest,
-        tenant_context: TenantContext = Depends(app.state.auth.get_current_tenant),
+    async def query_rag_system(
+        request: QueryRequest,
+        tenant_context: TenantContext = Depends(get_current_tenant),
     ):
-        """Query the RAG system."""
+        """Query the RAG system with tenant isolation."""
         try:
-            response = await app.state.rag_agent.query(
-                query=query_request.query,
+            result = await rag_agent.query(
                 tenant_context=tenant_context,
-                use_vector=query_request.use_vector,
-                use_graph=query_request.use_graph,
-                max_results=query_request.max_results,
+                query=request.query,
+                context=request.context,
             )
 
             return QueryResponse(
-                query=query_request.query,
-                response=response,
-                tenant_id=tenant_context.tenant_id,
-                sources=[],  # Would be populated from actual search results
-                timestamp=datetime.utcnow(),
+                response=result["response"],
+                tenant_id=result["tenant_id"],
+                timestamp=result["timestamp"],
+                metadata=result["metadata"],
             )
 
         except Exception as e:
-            logger.error(
-                f"Failed to process query for tenant {tenant_context.tenant_id}: {e}"
-            )
+            logger.error(f"Failed to process query: {e}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Failed to process query",
@@ -654,194 +630,64 @@ def create_app(
 
     @app.post("/search")
     async def search_knowledge_base(
-        search_request: SearchRequest,
-        tenant_context: TenantContext = Depends(app.state.auth.get_current_tenant),
+        query: str,
+        limit: int = 10,
+        tenant_context: TenantContext = Depends(get_current_tenant),
     ):
-        """Search the knowledge base."""
+        """Search tenant's knowledge base."""
         try:
-            results = await app.state.rag_agent.quick_search(
-                tenant_id=tenant_context.tenant_id,
-                query=search_request.query,
-                search_type=search_request.search_type,
+            # Use hybrid search for comprehensive results
+            results = await rag_agent.hybrid_search(
+                tenant_context=tenant_context, query=query, limit=limit
             )
 
-            return {
-                "query": search_request.query,
-                "search_type": search_request.search_type,
-                "tenant_id": tenant_context.tenant_id,
-                "results": results,
-                "timestamp": datetime.utcnow().isoformat(),
-            }
+            return results
 
         except Exception as e:
-            logger.error(f"Failed to search for tenant {tenant_context.tenant_id}: {e}")
+            logger.error(f"Failed to search knowledge base: {e}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Failed to search knowledge base",
             )
 
-    # Knowledge Graph Routes
-
-    @app.post("/relationships")
-    async def create_relationship(
-        relationship_data: RelationshipCreate,
-        tenant_context: TenantContext = Depends(app.state.auth.get_current_tenant),
-    ):
-        """Create a manual relationship in the knowledge graph."""
-        try:
-            # Check permissions
-            if "write" not in tenant_context.permissions:
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Insufficient permissions to create relationships",
-                )
-
-            success = await app.state.rag_agent._add_manual_relationship_tool(
-                ctx=type(
-                    "Context",
-                    (),
-                    {
-                        "get": lambda self, key: tenant_context
-                        if key == "tenant_context"
-                        else None
-                    },
-                )(),
-                source_entity=relationship_data.source_entity,
-                target_entity=relationship_data.target_entity,
-                relationship_type=relationship_data.relationship_type,
-                description=relationship_data.description,
-            )
-
-            if not success:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Failed to create relationship",
-                )
-
-            return {
-                "message": "Relationship created successfully",
-                "tenant_id": tenant_context.tenant_id,
-                "relationship": {
-                    "source": relationship_data.source_entity,
-                    "target": relationship_data.target_entity,
-                    "type": relationship_data.relationship_type,
-                },
-            }
-
-        except HTTPException:
-            raise
-        except Exception as e:
-            logger.error(
-                f"Failed to create relationship for tenant {tenant_context.tenant_id}: {e}"
-            )
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to create relationship",
-            )
-
-    @app.get("/entities/{entity_name}/relationships")
-    async def get_entity_relationships(
-        entity_name: str,
-        depth: int = 2,
-        tenant_context: TenantContext = Depends(app.state.auth.get_current_tenant),
-    ):
-        """Get relationships for an entity."""
-        try:
-            relationships = await app.state.rag_agent._get_entity_relationships_tool(
-                ctx=type(
-                    "Context",
-                    (),
-                    {
-                        "get": lambda self, key: tenant_context
-                        if key == "tenant_context"
-                        else None
-                    },
-                )(),
-                entity_name=entity_name,
-                depth=depth,
-            )
-
-            return {
-                "entity_name": entity_name,
-                "tenant_id": tenant_context.tenant_id,
-                "relationships": relationships,
-                "timestamp": datetime.utcnow().isoformat(),
-            }
-
-        except Exception as e:
-            logger.error(
-                f"Failed to get relationships for tenant {tenant_context.tenant_id}: {e}"
-            )
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to get entity relationships",
-            )
-
-    # Analytics and Monitoring Routes
-
-    @app.get("/stats")
+    @app.get("/stats", response_model=StatsResponse)
     async def get_tenant_stats(
-        tenant_context: TenantContext = Depends(app.state.auth.get_current_tenant),
+        tenant_context: TenantContext = Depends(get_current_tenant),
     ):
-        """Get comprehensive tenant statistics."""
+        """Get statistics for tenant's data."""
         try:
-            stats = await app.state.rag_agent._get_tenant_stats_tool(
-                ctx=type(
-                    "Context",
-                    (),
-                    {
-                        "get": lambda self, key: tenant_context
-                        if key == "tenant_context"
-                        else None
-                    },
-                )()
-            )
+            stats = await rag_agent.get_tenant_stats(tenant_context.tenant_id)
 
-            return stats
+            return StatsResponse(
+                tenant_id=stats["tenant_id"],
+                documents=stats["documents"],
+                chunks=stats["chunks"],
+                graph_entities=stats["graph_entities"],
+                graph_relationships=stats["graph_relationships"],
+                timestamp=stats["timestamp"],
+            )
 
         except Exception as e:
-            logger.error(
-                f"Failed to get stats for tenant {tenant_context.tenant_id}: {e}"
-            )
+            logger.error(f"Failed to get tenant stats: {e}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to get tenant statistics",
+                detail="Failed to get tenant stats",
             )
 
     @app.get("/validate-isolation")
-    async def validate_isolation(
-        tenant_context: TenantContext = Depends(app.state.auth.get_current_tenant),
+    async def validate_tenant_isolation(
+        tenant_context: TenantContext = Depends(get_current_tenant),
     ):
-        """Validate tenant data isolation."""
+        """Validate tenant isolation is working correctly."""
         try:
-            validation = await app.state.rag_agent.validate_tenant_isolation(
-                tenant_context.tenant_id
-            )
-            return validation
+            results = await rag_agent.validate_isolation(tenant_context.tenant_id)
+            return results
 
         except Exception as e:
-            logger.error(
-                f"Failed to validate isolation for tenant {tenant_context.tenant_id}: {e}"
-            )
+            logger.error(f"Failed to validate isolation: {e}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to validate tenant isolation",
+                detail="Failed to validate isolation",
             )
 
     return app
-
-
-# Development server
-if __name__ == "__main__":
-    import uvicorn
-
-    # Configuration for development
-    app = create_app(
-        neon_connection_string="postgresql://user:pass@localhost/rag_db",
-        neo4j_uri="neo4j://localhost:7687",
-        neo4j_user="neo4j",
-        neo4j_password="password",
-        jwt_secret_key="your-secret-key-change-in-production",
-    )
-
-    uvicorn.run(app, host="0.0.0.0", port=8000, reload=True, log_level="info")

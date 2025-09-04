@@ -4,34 +4,35 @@
 
 A **production-ready, multi-tenant Retrieval-Augmented Generation (RAG) system** with complete data isolation, combining **Neon PostgreSQL + pgvector** for vector search and **Neo4j + Graphiti** for knowledge graph capabilities.
 
-Built following **industry-standard SaaS multi-tenancy patterns** with Row-Level Security (RLS) and namespace isolation.
+Built following **official Neon and Graphiti best practices** with project-per-tenant database isolation and namespace-based graph isolation.
 
 ## ✨ **Key Features**
 
-- 🔒 **Complete Tenant Isolation**: Row-Level Security + namespace isolation
-- 🚀 **Production Ready**: Industry-standard architecture and security
+- 🔒 **Complete Tenant Isolation**: Project-per-tenant databases + namespace isolation
+- 🚀 **Production Ready**: Following official Neon & Graphiti best practices
 - 🤖 **AI-Powered**: Pydantic AI agent with tenant-aware tools
 - 📊 **Dual Storage**: Vector search + knowledge graph
-- 🔐 **Secure Authentication**: JWT-based with rate limiting
-- 📈 **Scalable**: Async architecture with connection pooling
+- 🔐 **Secure Authentication**: JWT-based with tenant context
+- 📈 **Scalable**: Project-per-tenant architecture with linear scaling
+- 💰 **Cost Optimized**: Scale-to-zero for inactive tenants
 - 🧪 **Fully Tested**: Comprehensive test suite included
 
 ## 🏗️ **Architecture**
 
-```
+```text
 ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   FastAPI       │    │   Neon          │    │   Neo4j         │
-│   Multi-Tenant  │────│   PostgreSQL    │    │   + Graphiti    │
-│   API Server    │    │   + pgvector    │    │   Knowledge     │
-│                 │    │   (RLS)         │    │   Graph         │
+│   FastAPI       │    │   Neon Projects │    │   Neo4j         │
+│   Multi-Tenant  │────│   (Per-Tenant)  │    │   + Graphiti    │
+│   API Server    │    │   Isolated DBs  │    │   + group_id    │
+│                 │    │                 │    │   Namespacing   │
 └─────────────────┘    └─────────────────┘    └─────────────────┘
          │                       │                       │
          └───────────────────────┼───────────────────────┘
                                  │
                     ┌─────────────────┐
-                    │   Pydantic AI   │
-                    │   Agent with    │
-                    │   Tenant Tools  │
+                    │   Catalog DB    │
+                    │   (Control      │
+                    │   Plane)        │
                     └─────────────────┘
 ```
 
@@ -42,9 +43,9 @@ Tenant/
 ├── __init__.py                 # Package initialization
 ├── main.py                     # Application entry point
 ├── requirements.txt            # Python dependencies
-├── schema.sql                  # PostgreSQL schema with RLS
-├── tenant_manager.py           # Database operations with tenant isolation
-├── multi_tenant_graphiti.py    # Graph operations with namespace isolation
+├── catalog_schema.sql          # Catalog database schema for tenant management
+├── tenant_manager.py           # Multi-tenant manager with Neon project lifecycle
+├── tenant_graphiti_client.py   # Shared Graphiti with tenant namespacing
 ├── multi_tenant_agent.py       # AI agent with tenant-aware tools
 ├── multi_tenant_api.py         # FastAPI application with authentication
 ├── auth_middleware.py          # JWT authentication and security
@@ -74,10 +75,13 @@ pip install -r requirements.txt
 Create `.env` file:
 
 ```bash
-# Database Configuration
-NEON_CONNECTION_STRING=postgresql://user:pass@host/db?sslmode=require
+# Database Configuration (Catalog DB - Control Plane)
+CATALOG_DATABASE_URL=postgresql://user:pass@host/catalog_db?sslmode=require
 
-# Neo4j Configuration  
+# Neon API Configuration (for creating tenant projects)
+NEON_API_KEY=your_neon_api_key
+
+# Neo4j Configuration (Shared instance)
 NEO4J_URI=neo4j+s://xxx.databases.neo4j.io
 NEO4J_USER=neo4j
 NEO4J_PASSWORD=your_password
@@ -97,8 +101,8 @@ APP_PORT=8000
 ### **3. Database Setup**
 
 ```bash
-# Run PostgreSQL schema (creates tables with RLS)
-psql "$NEON_CONNECTION_STRING" -f schema.sql
+# Setup catalog database (control plane)
+psql "$CATALOG_DATABASE_URL" -f catalog_schema.sql
 ```
 
 ### **4. Start the Application**
@@ -167,31 +171,36 @@ curl -X POST "http://localhost:8000/query" \
 ## 🔧 **Core Components**
 
 ### **TenantManager** (`tenant_manager.py`)
-- PostgreSQL operations with Row-Level Security
-- Document and chunk management
-- Vector search with tenant filtering
-- Connection pooling and error handling
 
-### **TenantGraphitiClient** (`multi_tenant_graphiti.py`)
-- Neo4j + Graphiti operations with namespace isolation
-- Episode ingestion and entity relationship extraction
+- Neon project creation and management via API
+- Tenant lifecycle management (create, delete, migrate)
+- Database routing and connection management
+- Catalog database operations for tenant metadata
+
+### **TenantGraphitiClient** (`tenant_graphiti_client.py`)
+
+- Shared Neo4j + Graphiti instance with namespace isolation
+- Episode ingestion and entity relationship extraction using group_id
 - Graph search and analytics within tenant boundaries
-- Temporal queries and timeline analysis
+- Temporal queries and timeline analysis per tenant
 
 ### **MultiTenantRAGAgent** (`multi_tenant_agent.py`)
-- Pydantic AI agent with tenant-aware tools
-- Hybrid search combining vector and graph results
+
+- Pydantic AI agent with tenant-aware dependencies
+- Hybrid search combining vector (tenant DB) and graph (namespaced) results
 - Document ingestion with automatic knowledge graph updates
 - Complete tenant isolation in all operations
 
 ### **Authentication & Security** (`auth_middleware.py`)
+
 - JWT-based authentication with tenant context
-- Rate limiting and security monitoring
+- Tenant routing and validation middleware
 - Permission validation and audit logging
 - Cross-tenant access prevention
 
 ### **FastAPI Application** (`multi_tenant_api.py`)
-- RESTful API with tenant routing
+
+- RESTful API with tenant project routing
 - Comprehensive endpoints for all operations
 - Built-in API documentation
 - Health checks and monitoring
@@ -199,18 +208,21 @@ curl -X POST "http://localhost:8000/query" \
 ## 🔒 **Security Guarantees**
 
 ### **Database Level**
-- ✅ Row-Level Security (RLS) on all tables
-- ✅ Tenant-aware vector search functions
-- ✅ Foreign key constraints within tenant boundaries
-- ✅ Query-level tenant filtering
+
+- ✅ Complete project-level isolation (one Neon project per tenant)
+- ✅ No cross-tenant data access possible (physical separation)
+- ✅ Independent scaling and performance per tenant
+- ✅ Built-in backup and recovery per tenant
 
 ### **Graph Level**
+
 - ✅ Namespace isolation using `group_id`
 - ✅ Tenant-tagged entities and relationships
 - ✅ Namespace-scoped search and analytics
 - ✅ Prevent cross-tenant data access
 
 ### **Application Level**
+
 - ✅ JWT tokens with tenant claims
 - ✅ Middleware-level tenant validation
 - ✅ Permission-based access control

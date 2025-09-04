@@ -2,20 +2,20 @@
 Multi-Tenant RAG System
 
 A production-ready, multi-tenant Retrieval-Augmented Generation (RAG) system
-with complete data isolation using Neon PostgreSQL + pgvector and Neo4j + Graphiti.
+with complete data isolation using Neon PostgreSQL (project-per-tenant) and Neo4j + Graphiti.
 
 Key Features:
-- Complete tenant isolation using Row-Level Security (RLS)
-- Vector search with pgvector
-- Knowledge graph capabilities with Graphiti
+- Complete tenant isolation using project-per-tenant architecture (Neon official best practice)
+- Vector search with pgvector in isolated databases
+- Knowledge graph capabilities with Graphiti namespace isolation
 - JWT-based authentication and authorization
 - FastAPI REST API with comprehensive endpoints
 - Pydantic AI agent with tenant-aware tools
-- Industry-standard security and scalability patterns
+- Production-ready security and scalability patterns
 
 Components:
-- tenant_manager: Database operations with tenant isolation
-- multi_tenant_graphiti: Graph operations with namespace isolation
+- tenant_manager: Complete tenant lifecycle management with Neon project-per-tenant operations
+- tenant_graphiti_client: Graph operations with group_id namespace isolation
 - multi_tenant_agent: AI agent with tenant-aware tools
 - multi_tenant_api: FastAPI application with authentication
 - auth_middleware: JWT authentication and security middleware
@@ -26,26 +26,75 @@ __author__ = "Multi-Tenant RAG Team"
 __license__ = "MIT"
 
 # Core components
-from .tenant_manager import TenantManager, Tenant, Document, Chunk
-from .multi_tenant_graphiti import (
+from .tenant_manager import (
+    TenantManager,
+    TenantCreateRequest,
+    TenantInfo,
+    TenantUsageStats,
+    TenantError,
+    TenantNotFoundError,
+    TenantCreationError,
+    TenantDeletionError,
+    TenantStatus,
+)
+
+# Import Document and Chunk models (temporarily define here for compatibility)
+from typing import Optional, Dict, Any, List
+from datetime import datetime
+from pydantic import BaseModel, Field
+
+
+class Document(BaseModel):
+    """Document model for tenant operations."""
+
+    id: Optional[str] = None
+    title: str
+    source: str
+    content: str
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+
+class Chunk(BaseModel):
+    """Document chunk model."""
+
+    id: Optional[str] = None
+    document_id: str
+    content: str
+    embedding: Optional[List[float]] = None
+    chunk_index: int
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    token_count: Optional[int] = None
+    created_at: Optional[datetime] = None
+
+
+from .tenant_graphiti_client import (
     TenantGraphitiClient,
     GraphEpisode,
     GraphEntity,
     GraphRelationship,
 )
-from .multi_tenant_agent import MultiTenantRAGAgent, TenantContext, RAGResult
-from .auth_middleware import JWTManager, TenantAuth, TenantSecurityManager
+from .multi_tenant_agent import MultiTenantRAGAgent, TenantContext
+from .auth_middleware import JWTManager, TenantAuthMiddleware, TenantSecurityManager
 
 # API application
 from .multi_tenant_api import create_app
 
-# Main application
-from .main import app, Config
+# Main configuration
+from .main import Config
 
 __all__ = [
     # Core classes
     "TenantManager",
-    "Tenant",
+    "TenantCreateRequest",
+    "TenantInfo",
+    "TenantUsageStats",
+    "TenantError",
+    "TenantNotFoundError",
+    "TenantCreationError",
+    "TenantDeletionError",
+    "TenantStatus",
     "Document",
     "Chunk",
     "TenantGraphitiClient",
@@ -61,7 +110,6 @@ __all__ = [
     "TenantSecurityManager",
     # Application
     "create_app",
-    "app",
     "Config",
     # Version info
     "__version__",
@@ -84,11 +132,11 @@ def get_info():
         "license": __license__,
         "description": "Production-ready multi-tenant RAG with complete data isolation",
         "components": [
-            "Neon PostgreSQL with pgvector",
-            "Neo4j with Graphiti",
+            "Neon PostgreSQL with pgvector (project-per-tenant)",
+            "Neo4j with Graphiti (namespace isolation)",
             "FastAPI with JWT auth",
             "Pydantic AI agent",
-            "Row-Level Security (RLS)",
-            "Namespace isolation",
+            "Complete database isolation",
+            "Namespace-based graph isolation",
         ],
     }

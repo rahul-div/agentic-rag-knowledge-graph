@@ -1,0 +1,32 @@
+{
+  "timestamp": "2025-09-04T20:58:50.790824",
+  "summary": {
+    "total_tests": 8,
+    "passed_tests": 8,
+    "failed_tests": 0,
+    "success_rate": 100.0
+  },
+  "results": {
+    "phase_1": {
+      "catalog_database": "PASSED"
+    },
+    "phase_2": {
+      "tenant_creation": "PASSED",
+      "graphiti_integration": "PASSED",
+      "document_ingestion": "PASSED"
+    },
+    "isolation_tests": {
+      "database_isolation": "PASSED",
+      "graph_isolation": "PASSED"
+    },
+    "end_to_end_tests": {
+      "vector_search": "PASSED",
+      "graph_search": "PASSED"
+    },
+    "errors": []
+  },
+  "tenant_ids": {
+    "tenant_1_acme": "a205f04f-7f1e-4dc1-91f6-acaeab6a8727",
+    "tenant_2_tesla": "9a8ff25a-b7a2-49c8-9ce1-e35b7545ac67"
+  }
+}

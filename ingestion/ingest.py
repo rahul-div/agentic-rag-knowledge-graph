@@ -249,8 +249,13 @@ class DocumentIngestionPipeline:
         logger.info(f"Processing document: {document_title}")
 
         # EPIC 3: Onyx Cloud ingestion (before Graphiti processing)
-        onyx_result = {"ingested": False, "document_id": None, "sections_count": 0, "errors": []}
-        
+        onyx_result = {
+            "ingested": False,
+            "document_id": None,
+            "sections_count": 0,
+            "errors": [],
+        }
+
         if self.config.enable_onyx_ingestion:
             logger.info(f"🔮 Starting Onyx Cloud dual ingestion for: {document_title}")
             try:
@@ -261,24 +266,26 @@ class DocumentIngestionPipeline:
                         **document_metadata,
                         "dual_ingestion": True,
                         "local_document_title": document_title,
-                        "local_document_source": document_source
-                    }
+                        "local_document_source": document_source,
+                    },
                 )
-                
+
                 onyx_result = {
                     "ingested": onyx_ingestion_result.get("success", False),
                     "document_id": onyx_ingestion_result.get("document_id"),
                     "sections_count": onyx_ingestion_result.get("sections_count", 0),
-                    "errors": []
+                    "errors": [],
                 }
-                
-                logger.info(f"✅ Onyx Cloud ingestion completed: {onyx_result['document_id']} ({onyx_result['sections_count']} sections)")
-                
+
+                logger.info(
+                    f"✅ Onyx Cloud ingestion completed: {onyx_result['document_id']} ({onyx_result['sections_count']} sections)"
+                )
+
             except OnyxIngestionError as e:
                 error_msg = f"Onyx ingestion failed: {str(e)}"
                 logger.warning(f"⚠️  {error_msg}")
                 onyx_result["errors"].append(error_msg)
-                
+
             except Exception as e:
                 error_msg = f"Unexpected Onyx ingestion error: {str(e)}"
                 logger.error(f"❌ {error_msg}")
@@ -390,7 +397,7 @@ class DocumentIngestionPipeline:
 
         # Combine all errors (graph + onyx)
         all_errors = graph_errors + onyx_result.get("errors", [])
-        
+
         return IngestionResult(
             document_id=document_id,
             title=document_title,
@@ -655,6 +662,7 @@ Examples:
   python -m ingestion.ingest --all-docs         # Process all documents
   python -m ingestion.ingest --clear            # Clear all data and process first document
   python -m ingestion.ingest --clear --all-docs # Clear all data and process all documents
+  python -m ingestion.ingest --clear-only       # Only clear all data (no ingestion)
   python -m ingestion.ingest --fast             # Skip knowledge graph building (faster)
   python -m ingestion.ingest --verbose          # Enable detailed logging
   python -m ingestion.ingest --dual-ingest      # Enable Onyx Cloud + Graphiti dual ingestion
@@ -713,6 +721,11 @@ Examples:
         action="store_true",
         help="Enable dual ingestion to Onyx Cloud before Graphiti processing (EPIC 3)",
     )
+    parser.add_argument(
+        "--clear-only",
+        action="store_true",
+        help="Only clear all existing data from both PostgreSQL and Neo4j/Graphiti without ingesting any documents",
+    )
 
     args = parser.parse_args()
 
@@ -731,12 +744,16 @@ Examples:
         )
     else:
         logger.info("📚 FULL MODE: Will process all documents in the folder")
-    
+
     # EPIC 3: Dual ingestion status
     if args.dual_ingest:
-        logger.info("🔮 DUAL INGESTION MODE: Documents will be ingested to Onyx Cloud before Graphiti processing")
+        logger.info(
+            "🔮 DUAL INGESTION MODE: Documents will be ingested to Onyx Cloud before Graphiti processing"
+        )
     else:
-        logger.info("📚 SINGLE INGESTION MODE: Documents will be processed locally only (use --dual-ingest for Onyx Cloud)")
+        logger.info(
+            "📚 SINGLE INGESTION MODE: Documents will be processed locally only (use --dual-ingest for Onyx Cloud)"
+        )
 
     # Handle clear/clean flags
     clean_before_ingest = args.clear or args.clean
@@ -745,6 +762,67 @@ Examples:
     elif args.clean:
         logger.warning("⚠️  --clean flag is deprecated, use --clear instead")
         logger.info("🧹 CLEAN MODE: Will clean all existing data before ingestion")
+
+    # Handle clear-only mode
+    if args.clear_only:
+        logger.info(
+            "🧹 CLEAR-ONLY MODE: Will clear all existing data and exit (no ingestion)"
+        )
+
+        # Validate Gemini configuration (required for initialization)
+        try:
+            validate_gemini_configuration()
+        except ValueError as e:
+            logger.error(f"Configuration error: {e}")
+            logger.error("Please ensure your .env file contains the correct API keys")
+            return
+
+        # Create minimal config for clearing only
+        config = IngestionConfig(
+            chunk_size=800,
+            chunk_overlap=150,
+            use_semantic_chunking=True,
+            extract_entities=False,
+            skip_graph_building=False,
+            single_document_mode=True,
+            enable_onyx_ingestion=False,
+        )
+
+        # Create pipeline for clearing only
+        pipeline = DocumentIngestionPipeline(
+            config=config,
+            documents_folder=args.documents,
+            clean_before_ingest=False,  # We'll call clean manually
+        )
+
+        try:
+            # Initialize pipeline
+            await pipeline.initialize()
+
+            # Clear databases
+            await pipeline._clean_databases()
+
+            print("\n" + "=" * 50)
+            print("🧹 CLEAR-ONLY COMPLETE")
+            print("=" * 50)
+            print("✅ PostgreSQL database cleared")
+            print("✅ Neo4j/Graphiti knowledge graph cleared")
+            print("✅ All existing data removed successfully")
+            print("\n🚀 Databases are now clean and ready for fresh ingestion!")
+
+        except Exception as e:
+            logger.error(f"Failed to clear databases: {e}")
+        finally:
+            await pipeline.close()
+
+        return  # Exit after clearing
+
+    # Validate other flag combinations
+    if args.clear_only and (args.clear or args.clean):
+        logger.warning(
+            "⚠️  --clear-only flag specified with --clear/--clean. Using --clear-only mode."
+        )
+        clean_before_ingest = False  # clear-only handles its own clearing
 
     # Debug environment loading
     logger.debug(f"Current working directory: {os.getcwd()}")
@@ -796,26 +874,32 @@ Examples:
         # Calculate Onyx statistics
         onyx_ingested_count = sum(1 for r in results if r.onyx_ingested)
         onyx_total_sections = sum(r.onyx_sections_count for r in results)
-        
+
         # Print summary
         print("\n" + "=" * 50)
-        print("DUAL INGESTION SUMMARY (GEMINI + ONYX CLOUD)" if args.dual_ingest else "INGESTION SUMMARY (GEMINI-POWERED)")
+        print(
+            "DUAL INGESTION SUMMARY (GEMINI + ONYX CLOUD)"
+            if args.dual_ingest
+            else "INGESTION SUMMARY (GEMINI-POWERED)"
+        )
         print("=" * 50)
         print(f"Documents processed: {len(results)}")
         print(f"Total chunks created: {sum(r.chunks_created for r in results)}")
         print(f"Total entities extracted: {sum(r.entities_extracted for r in results)}")
         print(f"Total graph episodes: {sum(r.relationships_created for r in results)}")
-        
+
         # EPIC 3: Onyx Cloud statistics
         if args.dual_ingest:
-            print(f"Onyx Cloud ingested: {onyx_ingested_count}/{len(results)} documents")
+            print(
+                f"Onyx Cloud ingested: {onyx_ingested_count}/{len(results)} documents"
+            )
             print(f"Onyx total sections: {onyx_total_sections}")
-        
+
         print(f"Total errors: {sum(len(r.errors) for r in results)}")
         print(f"Total processing time: {total_time:.2f} seconds")
         print("Embedding model: Gemini embedding-001 (768 dimensions)")
         print("LLM models: Gemini 2.0 Flash series")
-        
+
         if args.dual_ingest:
             print("🔮 Dual ingestion: Local Graphiti + Onyx Cloud")
         else:
@@ -825,18 +909,23 @@ Examples:
         # Print individual results
         for result in results:
             status = "✓" if not result.errors else "✗"
-            
+
             # Build result string
-            result_parts = [f"{result.chunks_created} chunks", f"{result.entities_extracted} entities"]
-            
+            result_parts = [
+                f"{result.chunks_created} chunks",
+                f"{result.entities_extracted} entities",
+            ]
+
             # EPIC 3: Add Onyx status if dual ingestion was enabled
             if args.dual_ingest:
                 onyx_status = "🔮" if result.onyx_ingested else "⚪"
                 if result.onyx_ingested:
-                    result_parts.append(f"{onyx_status} Onyx: {result.onyx_sections_count} sections")
+                    result_parts.append(
+                        f"{onyx_status} Onyx: {result.onyx_sections_count} sections"
+                    )
                 else:
                     result_parts.append(f"{onyx_status} Onyx: failed")
-            
+
             print(f"{status} {result.title}: {', '.join(result_parts)}")
 
             if result.errors:

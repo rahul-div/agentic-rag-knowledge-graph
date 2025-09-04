@@ -32,6 +32,16 @@ except ImportError:
         def __init__(self, app):
             self.app = app
 
+    class Request:
+        def __init__(self):
+            self.headers = {}
+            self.url = None
+
+    class Response:
+        def __init__(self, content=None, status_code=200):
+            self.content = content
+            self.status_code = status_code
+
     class JWTError(Exception):
         pass
 

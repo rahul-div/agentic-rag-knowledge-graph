@@ -1,74 +1,150 @@
 # Multi-Tenant RAG System Requirements
-# Core dependencies for production deployment
+# Core dependencies for production deployment - based on working requirements_final.txt
 
-# FastAPI and Web Framework
-fastapi==0.104.1
-uvicorn[standard]==0.24.0
-python-multipart==0.0.6
-starlette==0.27.0
+# ============================================================================
+# CORE AI AND GRAPHITI DEPENDENCIES
+# ============================================================================
 
-# Database and Vector Store
-asyncpg==0.29.0
-pgvector==0.2.4
-psycopg2-binary==2.9.9
+# Graphiti core with Google Gemini support (using working version)
+graphiti-core[google-genai]==0.18.0
 
-# Graph Database and Graphiti
-neo4j==5.15.0
-graphiti-core==0.1.0
+# Pydantic AI framework (using working versions)
+pydantic-ai==0.3.2
 
-# AI and Machine Learning
-pydantic-ai==0.0.7
-openai==1.3.0
-tiktoken==0.5.2
+# Google Gemini API (using working versions)
+google-genai>=1.16.1
+google-auth>=2.40.0
 
-# Authentication and Security  
-python-jose[cryptography]==3.3.0
-passlib[bcrypt]==1.7.4
-python-dateutil==2.8.2
+# ============================================================================
+# WEB FRAMEWORK AND API
+# ============================================================================
 
-# Data Validation and Serialization
-pydantic==2.5.0
-pydantic-settings==2.1.0
+# FastAPI and server components (using working versions)
+fastapi>=0.115.13
+uvicorn>=0.34.3
+starlette>=0.46.2
+python-multipart>=0.0.20
 
-# Utilities and Helpers
-python-dotenv==1.0.0
-click==8.1.7
-rich==13.7.0
+# HTTP clients and networking (using working versions)
+httpx>=0.28.1
+requests>=2.32.4
 
-# Development and Testing (optional)
-pytest==7.4.3
-pytest-asyncio==0.21.1
-pytest-cov==4.1.0
-httpx==0.25.2
-pytest-mock==3.12.0
+# ============================================================================
+# DATABASE AND STORAGE
+# ============================================================================
 
-# Security and Code Quality (optional)
-bandit==1.7.5
-safety==2.3.4
-black==23.11.0
-isort==5.12.0
-flake8==6.1.0
+# Neo4j graph database (using working version)
+neo4j>=5.28.0
 
-# Documentation (optional)
-mkdocs==1.5.3
-mkdocs-material==9.4.8
+# PostgreSQL/Neon database (using working versions)
+asyncpg>=0.30.0
+psycopg2-binary>=2.9.9
 
-# Monitoring and Logging (optional)
-structlog==23.2.0
-prometheus-client==0.19.0
+# ============================================================================
+# CORE PYTHON DEPENDENCIES
+# ============================================================================
 
-# Production WSGI Server (alternative to uvicorn)
-gunicorn==21.2.0
+# Pydantic and validation (using working versions)
+pydantic>=2.11.7
+pydantic-settings>=2.10.0
 
-# Caching (optional for performance)
-redis==5.0.1
-aioredis==2.0.1
+# Environment and configuration
+python-dotenv>=1.1.0
 
-# File Processing (optional for document ingestion)
-PyPDF2==3.0.1
-python-docx==1.1.0
-markdown==3.5.1
+# ============================================================================
+# AUTHENTICATION AND SECURITY
+# ============================================================================
 
-# Environment and Configuration
-pyyaml==6.0.1
-toml==0.10.2
+# JWT and authentication
+python-jose[cryptography]>=3.3.0
+passlib[bcrypt]>=1.7.4
+
+# Date utilities
+python-dateutil>=2.9.0
+
+# ============================================================================
+# DATA PROCESSING AND UTILITIES
+# ============================================================================
+
+# Numerical and data processing
+numpy>=2.3.1
+
+# Text processing
+tiktoken>=0.5.2
+
+# YAML processing (using working version from requirements_final.txt)
+PyYAML>=6.0.2
+
+# ============================================================================
+# ASYNC AND CONCURRENCY
+# ============================================================================
+
+# Async utilities
+anyio>=4.9.0
+tenacity>=9.0.0
+
+# ============================================================================
+# CLI AND USER INTERFACE
+# ============================================================================
+
+# Rich text formatting (using working versions)
+rich>=14.0.0
+
+# CLI utilities
+click>=8.2.1
+
+# ============================================================================
+# DEVELOPMENT AND TESTING
+# ============================================================================
+
+# Testing framework (using working versions)
+pytest>=8.4.1
+pytest-asyncio>=1.0.0
+pytest-mock>=3.12.0
+
+# ============================================================================
+# SPECIALIZED DEPENDENCIES FOR MULTI-TENANT
+# ============================================================================
+
+# Enhanced monitoring for multi-tenant operations
+structlog>=23.2.0
+
+# Circuit breaker for external API calls (Neon API)
+circuitbreaker>=2.0.0
+backoff>=2.2.1
+
+# Caching and performance
+cachetools>=5.5.2
+
+# ============================================================================
+# ADDITIONAL MULTI-TENANT DEPENDENCIES
+# ============================================================================
+
+# JWT and authentication for tenant API keys
+python-jose[cryptography]>=3.3.0
+passlib[bcrypt]>=1.7.4
+
+# Enhanced HTTP client with timeout and retry for Neon API
+httpx>=0.28.1
+
+# Additional async utilities for multi-tenant operations
+aiofiles>=24.1.0
+
+# Advanced configuration management for multi-tenant environments
+pydantic-settings>=2.10.0
+
+# Type checking and validation
+typing-extensions>=4.14.0
+
+# ============================================================================
+# NOTES:
+# ============================================================================
+# 
+# This requirements.txt:
+# 1. Uses all working versions from requirements_final.txt
+# 2. Adds only essential multi-tenant specific dependencies
+# 3. Maintains compatibility with existing single-tenant system
+# 4. Includes necessary tools for Neon API integration
+# 5. Provides enhanced monitoring and error handling for multi-tenant operations
+# 6. Adds JWT authentication for tenant API key management
+# 7. Includes advanced configuration management for tenant-specific settings

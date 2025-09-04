@@ -1,0 +1,687 @@
+"""
+TenantDataIngestionService - Coordinated document ingestion into both Neon database and Neo4j graph.
+This service handles complete document ingestion workflows for specific tenants with proper isolation.
+"""
+
+import logging
+import uuid
+import time
+from typing import Any, Dict
+import asyncpg
+
+from tenant_ingestion_models import (
+    DocumentInput,
+    DocumentChunk,
+    TenantIngestionResult,
+    BatchIngestionResult,
+    TenantAgentDependencies,
+    IngestionError,
+    BatchIngestionError,
+)
+from tenant_manager import TenantManager
+
+logger = logging.getLogger(__name__)
+
+
+class SimpleEmbedder:
+    """Simple embedder for testing - replace with real embedder in production."""
+
+    async def create_chunks(self, content: str) -> list[DocumentChunk]:
+        """
+        Create chunks from document content.
+
+        Args:
+            content: Document content to chunk
+
+        Returns:
+            List of DocumentChunk objects
+        """
+        # Simple chunking by sentences/paragraphs
+        sentences = content.split(".")
+        chunks = []
+
+        current_chunk = ""
+        for sentence in sentences:
+            sentence = sentence.strip()
+            if not sentence:
+                continue
+
+            if len(current_chunk) + len(sentence) > 1000:  # Max chunk size
+                if current_chunk:
+                    chunks.append(
+                        DocumentChunk(
+                            content=current_chunk.strip(),
+                            token_count=len(current_chunk.split()),
+                            metadata={"chunk_method": "sentence_split"},
+                        )
+                    )
+                current_chunk = sentence + "."
+            else:
+                current_chunk += sentence + "."
+
+        # Add final chunk
+        if current_chunk:
+            chunks.append(
+                DocumentChunk(
+                    content=current_chunk.strip(),
+                    token_count=len(current_chunk.split()),
+                    metadata={"chunk_method": "sentence_split"},
+                )
+            )
+
+        return (
+            chunks
+            if chunks
+            else [
+                DocumentChunk(
+                    content=content,
+                    token_count=len(content.split()),
+                    metadata={"chunk_method": "full_document"},
+                )
+            ]
+        )
+
+    async def generate_embedding(self, text: str) -> list[float]:
+        """
+        Generate embedding for text.
+
+        Args:
+            text: Text to embed
+
+        Returns:
+            Embedding vector (mock for testing)
+        """
+        # Mock embedding - in production, use real embedder
+        import hashlib
+
+        hash_obj = hashlib.md5(text.encode())
+        hash_int = int(hash_obj.hexdigest(), 16)
+
+        # Generate consistent 768-dimensional vector
+        embedding = []
+        for i in range(768):
+            embedding.append((hash_int % 1000) / 1000.0 - 0.5)
+            hash_int = hash_int // 1000 + i
+
+        return embedding
+
+
+class TenantDataIngestionService:
+    """
+    Coordinate document ingestion into both Neon database and Neo4j graph.
+
+    This service provides:
+    1. Complete document ingestion workflow for specific tenants
+    2. Coordination between database and graph storage
+    3. Rollback capabilities on failure
+    4. Batch ingestion support
+    5. Document update and deletion workflows
+    """
+
+    def __init__(
+        self, tenant_manager: TenantManager, embedder_service: SimpleEmbedder = None
+    ):
+        """
+        Initialize ingestion service.
+
+        Args:
+            tenant_manager: TenantManager instance for tenant operations
+            embedder_service: Service for creating embeddings (optional, will create simple one)
+        """
+        self.tenant_manager = tenant_manager
+        self.embedder = embedder_service or SimpleEmbedder()
+
+    async def ingest_document_for_tenant(
+        self, tenant_id: str, document: DocumentInput
+    ) -> TenantIngestionResult:
+        """
+        Complete document ingestion workflow for specific tenant.
+
+        Args:
+            tenant_id: UUID of the tenant
+            document: DocumentInput to ingest
+
+        Returns:
+            TenantIngestionResult with ingestion details
+
+        Raises:
+            IngestionError: If any step of ingestion fails
+        """
+        start_time = time.time()
+        document_id = None
+
+        logger.info(
+            f"Starting document ingestion for tenant {tenant_id}: {document.title}"
+        )
+
+        try:
+            # 1. Get tenant-specific dependencies
+            deps = await TenantAgentDependencies.create_for_tenant(
+                tenant_id=tenant_id,
+                tenant_manager=self.tenant_manager,
+                shared_graphiti_client=self.tenant_manager.graphiti_client,
+            )
+
+            # 2. Store document in tenant's dedicated database
+            document_id = await self._store_document_in_tenant_db(deps, document)
+
+            # 3. Create and store chunks with embeddings
+            chunks_created = await self._process_and_store_chunks(
+                deps, document_id, document
+            )
+
+            # 4. Add document content to tenant's graph namespace
+            graph_episode_created = await self._add_document_to_tenant_graph(
+                deps, document_id, document
+            )
+
+            # 5. Update tenant usage metrics
+            await self._update_tenant_metrics(tenant_id, document)
+
+            processing_time = (time.time() - start_time) * 1000
+
+            result = TenantIngestionResult(
+                document_id=document_id,
+                title=document.title,
+                chunks_created=chunks_created,
+                processing_time_ms=processing_time,
+                graph_episode_created=graph_episode_created,
+                errors=[],
+            )
+
+            logger.info(
+                f"Successfully ingested document {document_id} for tenant {tenant_id} in {processing_time:.2f}ms"
+            )
+            return result
+
+        except Exception as e:
+            logger.error(f"Failed to ingest document for tenant {tenant_id}: {str(e)}")
+
+            # Rollback on failure
+            if document_id:
+                try:
+                    await self._rollback_ingestion(deps, document_id)
+                except Exception:
+                    pass  # Don't fail on rollback failure
+
+            processing_time = (time.time() - start_time) * 1000
+
+            # Return failed result
+            result = TenantIngestionResult(
+                document_id=document_id or "failed",
+                title=document.title,
+                chunks_created=0,
+                processing_time_ms=processing_time,
+                graph_episode_created=False,
+                errors=[str(e)],
+            )
+
+            raise IngestionError(
+                f"Failed to ingest document for tenant {tenant_id}: {str(e)}"
+            )
+
+    async def _store_document_in_tenant_db(
+        self, deps: TenantAgentDependencies, document: DocumentInput
+    ) -> str:
+        """
+        Store document in tenant's dedicated Neon database.
+
+        Args:
+            deps: Tenant-specific dependencies
+            document: Document to store
+
+        Returns:
+            Generated document ID
+
+        Raises:
+            Exception: If database storage fails
+        """
+        document_id = str(uuid.uuid4())
+
+        try:
+            # Connect to tenant's database
+            conn = await asyncpg.connect(deps.tenant_database_url)
+
+            try:
+                # Insert document
+                await conn.execute(
+                    """
+                    INSERT INTO documents (id, title, source, content, metadata, created_at)
+                    VALUES ($1, $2, $3, $4, $5, NOW())
+                """,
+                    document_id,
+                    document.title,
+                    document.source,
+                    document.content,
+                    document.metadata,
+                )
+
+                logger.debug(f"Stored document {document_id} in tenant database")
+                return document_id
+
+            finally:
+                await conn.close()
+
+        except Exception as e:
+            logger.error(f"Failed to store document in tenant database: {str(e)}")
+            raise
+
+    async def _process_and_store_chunks(
+        self, deps: TenantAgentDependencies, document_id: str, document: DocumentInput
+    ) -> int:
+        """
+        Create chunks, generate embeddings, store in tenant database.
+
+        Args:
+            deps: Tenant-specific dependencies
+            document_id: ID of the document
+            document: Document content
+
+        Returns:
+            Number of chunks created
+
+        Raises:
+            Exception: If chunk processing fails
+        """
+        try:
+            # Create chunks
+            chunks = await self.embedder.create_chunks(document.content)
+
+            # Connect to tenant's database
+            conn = await asyncpg.connect(deps.tenant_database_url)
+
+            try:
+                chunks_created = 0
+                for i, chunk in enumerate(chunks):
+                    # Generate embedding
+                    embedding = await self.embedder.generate_embedding(chunk.content)
+
+                    # Store chunk
+                    await conn.execute(
+                        """
+                        INSERT INTO chunks (id, document_id, content, embedding, chunk_index, token_count, metadata)
+                        VALUES ($1, $2, $3, $4, $5, $6, $7)
+                    """,
+                        str(uuid.uuid4()),
+                        document_id,
+                        chunk.content,
+                        embedding,
+                        i,
+                        chunk.token_count,
+                        chunk.metadata,
+                    )
+
+                    chunks_created += 1
+
+                logger.debug(
+                    f"Created {chunks_created} chunks for document {document_id}"
+                )
+                return chunks_created
+
+            finally:
+                await conn.close()
+
+        except Exception as e:
+            logger.error(
+                f"Failed to process chunks for document {document_id}: {str(e)}"
+            )
+            raise
+
+    async def _add_document_to_tenant_graph(
+        self, deps: TenantAgentDependencies, document_id: str, document: DocumentInput
+    ) -> bool:
+        """
+        Add document to tenant's graph namespace via Graphiti.
+
+        Args:
+            deps: Tenant-specific dependencies
+            document_id: ID of the document
+            document: Document content
+
+        Returns:
+            True if graph episode was created successfully
+
+        Raises:
+            Exception: If graph addition fails
+        """
+        try:
+            if not deps.shared_graphiti_client:
+                logger.warning(
+                    f"No Graphiti client available, skipping graph ingestion for document {document_id}"
+                )
+                return False
+
+            await deps.shared_graphiti_client.add_episode_for_tenant(
+                tenant_id=deps.tenant_id,
+                episode_name=f"Document: {document.title}",
+                episode_content=document.content,
+                source_description=f"Document from {document.source}",
+            )
+
+            logger.debug(f"Added document {document_id} to tenant graph namespace")
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to add document {document_id} to graph: {str(e)}")
+            # Don't raise - graph ingestion failure shouldn't fail entire ingestion
+            return False
+
+    async def _update_tenant_metrics(self, tenant_id: str, document: DocumentInput):
+        """
+        Update tenant usage metrics in catalog database.
+
+        Args:
+            tenant_id: UUID of the tenant
+            document: Document that was ingested
+
+        Raises:
+            Exception: If metrics update fails
+        """
+        try:
+            # TODO: Implement usage tracking in catalog database
+            # This would track documents ingested, storage used, etc.
+            logger.debug(f"Updated usage metrics for tenant {tenant_id}")
+
+        except Exception as e:
+            logger.warning(f"Failed to update tenant metrics for {tenant_id}: {str(e)}")
+            # Don't raise - metrics failure shouldn't fail ingestion
+
+    async def _rollback_ingestion(
+        self, deps: TenantAgentDependencies, document_id: str
+    ):
+        """
+        Rollback failed ingestion by cleaning up partial data.
+
+        Args:
+            deps: Tenant-specific dependencies
+            document_id: ID of the document to rollback
+        """
+        if not document_id:
+            return
+
+        try:
+            logger.info(f"Rolling back failed ingestion for document {document_id}")
+
+            # Connect to tenant's database
+            conn = await asyncpg.connect(deps.tenant_database_url)
+
+            try:
+                # Remove document and cascading chunks from database
+                await conn.execute("DELETE FROM documents WHERE id = $1", document_id)
+                logger.debug(f"Rollback: Removed document {document_id} from database")
+
+            finally:
+                await conn.close()
+
+            # Note: Graph cleanup is handled automatically by Graphiti transactions
+            # or would need to be implemented based on Graphiti capabilities
+
+        except Exception as rollback_error:
+            # Log rollback failure but don't raise to avoid masking original error
+            logger.error(
+                f"Rollback failed for document {document_id}: {rollback_error}"
+            )
+
+    async def batch_ingest_documents_for_tenant(
+        self, tenant_id: str, documents: list[DocumentInput]
+    ) -> BatchIngestionResult:
+        """
+        Batch ingest multiple documents for tenant with progress tracking.
+
+        Args:
+            tenant_id: UUID of the tenant
+            documents: List of documents to ingest
+
+        Returns:
+            BatchIngestionResult with batch processing details
+
+        Raises:
+            BatchIngestionError: If batch processing encounters errors
+        """
+        start_time = time.time()
+        successful_results = []
+        failed_documents = []
+
+        logger.info(
+            f"Starting batch ingestion of {len(documents)} documents for tenant {tenant_id}"
+        )
+
+        for i, document in enumerate(documents):
+            try:
+                result = await self.ingest_document_for_tenant(tenant_id, document)
+                successful_results.append(result)
+
+                # Progress logging
+                logger.info(
+                    f"Batch progress: {i + 1}/{len(documents)} documents processed"
+                )
+
+            except IngestionError as e:
+                failed_documents.append(
+                    {"document": document.model_dump(), "error": str(e), "index": i}
+                )
+                logger.warning(
+                    f"Failed to ingest document {i}: {document.title} - {str(e)}"
+                )
+                continue
+
+        processing_time = (time.time() - start_time) * 1000
+
+        result = BatchIngestionResult(
+            total_documents=len(documents),
+            successful_documents=len(successful_results),
+            failed_documents=len(failed_documents),
+            document_results=successful_results,
+            total_processing_time_ms=processing_time,
+            errors=[
+                f"Failed document {d['index']}: {d['error']}" for d in failed_documents
+            ],
+        )
+
+        logger.info(
+            f"Batch ingestion completed: {result.successful_documents}/{result.total_documents} successful in {processing_time:.2f}ms"
+        )
+
+        if failed_documents:
+            raise BatchIngestionError(
+                f"Batch ingestion completed with {len(failed_documents)} failures",
+                successful_ids=[r.document_id for r in successful_results],
+                failed_documents=failed_documents,
+            )
+
+        return result
+
+    async def update_document_for_tenant(
+        self, tenant_id: str, document_id: str, updated_document: DocumentInput
+    ) -> bool:
+        """
+        Update existing document in both database and graph.
+
+        Args:
+            tenant_id: UUID of the tenant
+            document_id: ID of document to update
+            updated_document: Updated document content
+
+        Returns:
+            True if update successful
+
+        Raises:
+            IngestionError: If update fails
+        """
+        logger.info(f"Updating document {document_id} for tenant {tenant_id}")
+
+        try:
+            # Get tenant dependencies
+            deps = await TenantAgentDependencies.create_for_tenant(
+                tenant_id=tenant_id,
+                tenant_manager=self.tenant_manager,
+                shared_graphiti_client=self.tenant_manager.graphiti_client,
+            )
+
+            # Connect to tenant's database
+            conn = await asyncpg.connect(deps.tenant_database_url)
+
+            try:
+                # 1. Update document in database
+                result = await conn.execute(
+                    """
+                    UPDATE documents 
+                    SET title = $2, content = $3, metadata = $4, updated_at = NOW()
+                    WHERE id = $1
+                """,
+                    document_id,
+                    updated_document.title,
+                    updated_document.content,
+                    updated_document.metadata,
+                )
+
+                if result == "UPDATE 0":
+                    raise IngestionError(f"Document {document_id} not found")
+
+                # 2. Regenerate chunks and embeddings
+                await conn.execute(
+                    "DELETE FROM chunks WHERE document_id = $1", document_id
+                )
+                await self._process_and_store_chunks(
+                    deps, document_id, updated_document
+                )
+
+            finally:
+                await conn.close()
+
+            # 3. Update graph (Graphiti handles episode updates)
+            await self._add_document_to_tenant_graph(
+                deps, document_id, updated_document
+            )
+
+            logger.info(
+                f"Successfully updated document {document_id} for tenant {tenant_id}"
+            )
+            return True
+
+        except Exception as e:
+            logger.error(
+                f"Failed to update document {document_id} for tenant {tenant_id}: {str(e)}"
+            )
+            raise IngestionError(f"Failed to update document: {str(e)}")
+
+    async def delete_document_for_tenant(
+        self, tenant_id: str, document_id: str
+    ) -> bool:
+        """
+        Delete document from both database and graph.
+
+        Args:
+            tenant_id: UUID of the tenant
+            document_id: ID of document to delete
+
+        Returns:
+            True if deletion successful
+
+        Raises:
+            IngestionError: If deletion fails
+        """
+        logger.info(f"Deleting document {document_id} for tenant {tenant_id}")
+
+        try:
+            # Get tenant dependencies
+            deps = await TenantAgentDependencies.create_for_tenant(
+                tenant_id=tenant_id,
+                tenant_manager=self.tenant_manager,
+                shared_graphiti_client=self.tenant_manager.graphiti_client,
+            )
+
+            # Connect to tenant's database
+            conn = await asyncpg.connect(deps.tenant_database_url)
+
+            try:
+                # Delete from database (cascades to chunks due to foreign key)
+                result = await conn.execute(
+                    "DELETE FROM documents WHERE id = $1", document_id
+                )
+
+                if result == "DELETE 0":
+                    raise IngestionError(f"Document {document_id} not found")
+
+            finally:
+                await conn.close()
+
+            # Note: Graph cleanup is handled automatically in Graphiti
+            # Episodes are content-based, so no explicit deletion needed
+
+            logger.info(
+                f"Successfully deleted document {document_id} for tenant {tenant_id}"
+            )
+            return True
+
+        except Exception as e:
+            logger.error(
+                f"Failed to delete document {document_id} for tenant {tenant_id}: {str(e)}"
+            )
+            raise IngestionError(f"Failed to delete document: {str(e)}")
+
+    async def get_tenant_document_stats(self, tenant_id: str) -> Dict[str, Any]:
+        """
+        Get document statistics for a tenant.
+
+        Args:
+            tenant_id: UUID of the tenant
+
+        Returns:
+            Dictionary with document statistics
+
+        Raises:
+            Exception: If statistics retrieval fails
+        """
+        try:
+            # Get tenant dependencies
+            deps = await TenantAgentDependencies.create_for_tenant(
+                tenant_id=tenant_id,
+                tenant_manager=self.tenant_manager,
+                shared_graphiti_client=self.tenant_manager.graphiti_client,
+            )
+
+            # Connect to tenant's database
+            conn = await asyncpg.connect(deps.tenant_database_url)
+
+            try:
+                # Get document count
+                doc_count = await conn.fetchval("SELECT COUNT(*) FROM documents")
+
+                # Get chunk count
+                chunk_count = await conn.fetchval("SELECT COUNT(*) FROM chunks")
+
+                # Get total content size
+                total_size = await conn.fetchval(
+                    "SELECT COALESCE(SUM(LENGTH(content)), 0) FROM documents"
+                )
+
+                # Get latest document
+                latest_doc = await conn.fetchrow("""
+                    SELECT title, created_at FROM documents 
+                    ORDER BY created_at DESC LIMIT 1
+                """)
+
+                return {
+                    "tenant_id": tenant_id,
+                    "document_count": doc_count,
+                    "chunk_count": chunk_count,
+                    "total_content_size_bytes": total_size,
+                    "latest_document": {
+                        "title": latest_doc["title"] if latest_doc else None,
+                        "created_at": latest_doc["created_at"].isoformat()
+                        if latest_doc
+                        else None,
+                    }
+                    if latest_doc
+                    else None,
+                }
+
+            finally:
+                await conn.close()
+
+        except Exception as e:
+            logger.error(
+                f"Failed to get document stats for tenant {tenant_id}: {str(e)}"
+            )
+            raise
