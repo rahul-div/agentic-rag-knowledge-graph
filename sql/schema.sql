@@ -65,7 +65,8 @@ CREATE INDEX idx_messages_session_id ON messages (session_id, created_at);
 
 CREATE OR REPLACE FUNCTION match_chunks(
     query_embedding vector(768),
-    match_count INT DEFAULT 10
+    match_count INT DEFAULT 10,
+    similarity_threshold FLOAT DEFAULT 0.5
 )
 RETURNS TABLE (
     chunk_id UUID,
@@ -91,7 +92,8 @@ BEGIN
     FROM chunks c
     JOIN documents d ON c.document_id = d.id
     WHERE c.embedding IS NOT NULL
-    ORDER BY c.embedding <=> query_embedding
+    AND (1 - (c.embedding <=> query_embedding)) >= similarity_threshold
+    ORDER BY (1 - (c.embedding <=> query_embedding)) DESC
     LIMIT match_count;
 END;
 $$;
@@ -100,7 +102,8 @@ CREATE OR REPLACE FUNCTION hybrid_search(
     query_embedding vector(768),
     query_text TEXT,
     match_count INT DEFAULT 10,
-    text_weight FLOAT DEFAULT 0.3
+    text_weight FLOAT DEFAULT 0.3,
+    similarity_threshold FLOAT DEFAULT 0.5
 )
 RETURNS TABLE (
     chunk_id UUID,
@@ -122,20 +125,21 @@ BEGIN
             c.id AS chunk_id,
             c.document_id,
             c.content,
-            1 - (c.embedding <=> query_embedding) AS vector_sim,
+            (1 - (c.embedding <=> query_embedding))::double precision AS vector_sim,
             c.metadata,
             d.title AS doc_title,
             d.source AS doc_source
         FROM chunks c
         JOIN documents d ON c.document_id = d.id
         WHERE c.embedding IS NOT NULL
+        AND (1 - (c.embedding <=> query_embedding)) >= similarity_threshold
     ),
     text_results AS (
         SELECT 
             c.id AS chunk_id,
             c.document_id,
             c.content,
-            ts_rank_cd(to_tsvector('english', c.content), plainto_tsquery('english', query_text)) AS text_sim,
+            ts_rank_cd(to_tsvector('english', c.content), plainto_tsquery('english', query_text))::double precision AS text_sim,
             c.metadata,
             d.title AS doc_title,
             d.source AS doc_source
@@ -147,9 +151,9 @@ BEGIN
         COALESCE(v.chunk_id, t.chunk_id) AS chunk_id,
         COALESCE(v.document_id, t.document_id) AS document_id,
         COALESCE(v.content, t.content) AS content,
-        (COALESCE(v.vector_sim, 0) * (1 - text_weight) + COALESCE(t.text_sim, 0) * text_weight) AS combined_score,
-        COALESCE(v.vector_sim, 0) AS vector_similarity,
-        COALESCE(t.text_sim, 0) AS text_similarity,
+        (COALESCE(v.vector_sim, 0.0) * (1 - text_weight) + COALESCE(t.text_sim, 0.0) * text_weight)::double precision AS combined_score,
+        COALESCE(v.vector_sim, 0.0)::double precision AS vector_similarity,
+        COALESCE(t.text_sim, 0.0)::double precision AS text_similarity,
         COALESCE(v.metadata, t.metadata) AS metadata,
         COALESCE(v.doc_title, t.doc_title) AS document_title,
         COALESCE(v.doc_source, t.doc_source) AS document_source

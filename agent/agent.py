@@ -25,7 +25,6 @@ from .tools import (
     onyx_search_tool,
     onyx_answer_with_quote_tool,
     comprehensive_search_tool,
-    local_dual_search_tool,
     VectorSearchInput,
     GraphSearchInput,
     HybridSearchInput,
@@ -36,7 +35,6 @@ from .tools import (
     OnyxSearchInput,
     OnyxAnswerInput,
     ComprehensiveSearchInput,
-    LocalDualSearchInput,
 )
 
 # Load environment variables
@@ -63,11 +61,6 @@ class AgentDependencies:
                 "use_onyx": True,
                 "default_limit": 10,
                 "onyx_retries": 7,  # Based on our validated configuration
-                # LOCAL-FIRST CONFIGURATION
-                "priority_local": True,  # Prioritize Local Path: Dual Storage
-                "vector_first": True,  # Try pgvector first for similarity
-                "graph_first": True,  # Try Neo4j + Graphiti first for relationships
-                "onyx_as_fallback": True,  # Use Onyx as enhancement/fallback
             }
 
 
@@ -424,44 +417,6 @@ async def comprehensive_search(
         onyx_service=ctx.deps.onyx_service,
         document_set_id=ctx.deps.onyx_document_set_id,
     )
-
-
-@rag_agent.tool
-async def local_dual_search(
-    ctx: RunContext[AgentDependencies],
-    query: str,
-    limit: int = 10,
-    use_vector: bool = True,
-    use_graph: bool = True,
-) -> Dict[str, Any]:
-    """
-    SMART Local Path: Dual Storage search with intelligent synthesis.
-    
-    This tool combines pgvector semantic similarity search with Neo4j + Graphiti 
-    knowledge graph search to provide comprehensive responses that include both
-    contextual content AND hidden relationship insights with full source citations.
-    
-    Perfect for queries requiring both semantic context and relationship discovery.
-    Use when you need the best of both local storage systems working together.
-    
-    Args:
-        query: Search query for both vector and graph search
-        limit: Maximum number of vector results (1-20, default: 10)
-        use_vector: Include pgvector semantic similarity search (default: True)
-        use_graph: Include Neo4j + Graphiti knowledge graph search (default: True)
-        
-    Returns:
-        Synthesized response combining semantic content with relationship insights,
-        complete with source citations and confidence scoring
-    """
-    input_data = LocalDualSearchInput(
-        query=query,
-        limit=min(max(limit, 1), 20),  # Ensure valid range
-        use_vector=use_vector,
-        use_graph=use_graph,
-    )
-    
-    return await local_dual_search_tool(input_data)
 
 
 # Helper function to initialize agent with Onyx integration
