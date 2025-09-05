@@ -17,18 +17,18 @@ All intermediate steps are logged and debugged.
 import asyncio
 import os
 import logging
-import json
-import uuid
-import hashlib
 import secrets
-import asyncpg
-import traceback
-from typing import Dict, Any, List, Optional
-from datetime import datetime, timedelta
+from typing import Dict, List, Optional
+from datetime import datetime
 from dataclasses import dataclass
 from pathlib import Path
 
 from dotenv import load_dotenv
+
+# Import our multi-tenant components
+from tenant_manager import TenantManager, TenantCreateRequest
+from tenant_data_ingestion_service import TenantDataIngestionService
+from tenant_ingestion_models import DocumentInput
 
 # Load environment
 load_dotenv()
@@ -40,10 +40,6 @@ logging.basicConfig(
     handlers=[logging.StreamHandler(), logging.FileHandler("end_to_end_workflow.log")],
 )
 logger = logging.getLogger(__name__)
-
-# Import our multi-tenant components
-from tenant_manager import TenantManager, TenantCreateRequest
-from multi_tenant_ingestion import MultiTenantIngestionPipeline, MultiTenantDocument
 
 
 @dataclass
@@ -75,7 +71,7 @@ class EndToEndWorkflowTester:
     def __init__(self):
         """Initialize the workflow tester"""
         self.tenant_manager = None
-        self.ingestion_pipeline = None
+        self.ingestion_service = None
         self.tenant_api_keys: Dict[str, TenantApiKey] = {}
         self.documents_folder = Path(
             "/Users/rahul/Desktop/Graphiti/agentic-rag-knowledge-graph/documents"
@@ -112,9 +108,11 @@ class EndToEndWorkflowTester:
         await self.tenant_manager._ensure_initialized()
         logger.info("✅ Tenant manager initialized")
 
-        # Initialize ingestion pipeline
-        self.ingestion_pipeline = MultiTenantIngestionPipeline()
-        logger.info("✅ Ingestion pipeline initialized")
+        # Initialize ingestion service (same as comprehensive_real_world_test.py)
+        self.ingestion_service = TenantDataIngestionService(
+            tenant_manager=self.tenant_manager
+        )
+        logger.info("✅ Ingestion service initialized")
 
         # Check documents folder structure
         if not self.documents_folder.exists():
@@ -170,7 +168,7 @@ class EndToEndWorkflowTester:
             tenant_info = await self.tenant_manager.create_tenant(create_request)
             tenant_id = str(tenant_info.tenant_id)
 
-            logger.info(f"✅ Tenant created successfully:")
+            logger.info("✅ Tenant created successfully:")
             logger.info(f"   - Tenant ID: {tenant_id}")
             logger.info(f"   - Name: {tenant_info.tenant_name}")
             logger.info(f"   - Email: {tenant_info.tenant_email}")
@@ -279,7 +277,7 @@ class EndToEndWorkflowTester:
                 logger.error(f"❌ Authentication failed for tenant {tenant_id}")
                 continue
 
-            logger.info(f"✅ API authentication successful")
+            logger.info("✅ API authentication successful")
 
             # Get documents for this specific tenant
             tenant_folder = self.documents_folder / tenant_folder_mapping[i]
@@ -333,7 +331,7 @@ class EndToEndWorkflowTester:
         logger.info(f"   📝 Document title: {title}")
 
         # Create document object
-        document = MultiTenantDocument(
+        document = DocumentInput(
             title=title,
             source=str(doc_path),
             content=content,
@@ -350,55 +348,21 @@ class EndToEndWorkflowTester:
         start_time = datetime.now()
 
         try:
-            # Step 2a: Create chunks
-            logger.info("   🔄 Creating document chunks...")
-            chunks = await self.ingestion_pipeline.chunker.chunk_document(
-                content=document.content,
-                title=document.title,
-                source=document.source,
-                metadata=document.metadata,
-            )
-            logger.info(f"   ✅ Created {len(chunks)} chunks")
+            # Use the tenant data ingestion service for complete workflow
+            logger.info("   🔄 Starting ingestion via TenantDataIngestionService...")
 
-            # Step 2b: Generate embeddings
-            logger.info("   🔄 Generating embeddings...")
-            embedded_chunks = await self.ingestion_pipeline.embedder.embed_chunks(
-                chunks
+            ingestion_result = await self.ingestion_service.ingest_document_for_tenant(
+                tenant_id=tenant_id, document=document
             )
-            embeddings_count = len(
-                [c for c in embedded_chunks if hasattr(c, "embedding") and c.embedding]
-            )
-            logger.info(f"   ✅ Generated {embeddings_count} embeddings")
-
-            # Step 2c: Store in tenant database
-            logger.info("   🔄 Storing in tenant database...")
-            document_id = await self.ingestion_pipeline._store_document_in_tenant_db(
-                tenant_info.database_url, document, embedded_chunks
-            )
-            logger.info(f"   ✅ Stored in database with ID: {document_id}")
-
-            # Step 2d: Add to knowledge graph
-            logger.info("   🔄 Adding to knowledge graph...")
-            if self.tenant_manager.graphiti_client:
-                await self.ingestion_pipeline._add_to_knowledge_graph(
-                    self.tenant_manager.graphiti_client,
-                    document,
-                    document_id,
-                    f"tenant_{tenant_id}",
-                )
-                logger.info(
-                    f"   ✅ Added to knowledge graph (namespace: tenant_{tenant_id})"
-                )
-            else:
-                logger.warning("   ⚠️  No Graphiti client available")
 
             # Calculate processing time
             processing_time = (datetime.now() - start_time).total_seconds()
 
             logger.info(f"   🎉 Document ingestion completed in {processing_time:.2f}s")
-            logger.info(f"      - Document ID: {document_id}")
-            logger.info(f"      - Chunks: {len(chunks)}")
-            logger.info(f"      - Embeddings: {embeddings_count}")
+            logger.info(f"      - Document ID: {ingestion_result.document_id}")
+            logger.info(f"      - Chunks: {ingestion_result.chunks_created}")
+            logger.info(f"      - Vector Status: {ingestion_result.vector_stored}")
+            logger.info(f"      - Graph Status: {ingestion_result.graph_stored}")
             logger.info(f"      - Namespace: tenant_{tenant_id}")
 
         except Exception as e:
@@ -460,25 +424,31 @@ class EndToEndWorkflowTester:
                     f"      - Chunk {chunk['chunk_index']}: {chunk['content_preview']}... (Embedding: {chunk['has_embedding']})"
                 )
 
-            # Test vector search
+            # Test vector search using proper service method
             if chunks_with_embeddings:
                 logger.info("   🔍 Testing vector search...")
-                test_embedding = [0.1] * 768  # Test embedding
-                embedding_str = "[" + ",".join(map(str, test_embedding)) + "]"
-
-                vector_results = await conn.fetch(
-                    """
-                    SELECT c.id, c.content, 1 - (c.embedding <=> $1::vector) as similarity
-                    FROM chunks c 
-                    WHERE c.embedding IS NOT NULL
-                    ORDER BY c.embedding <=> $1::vector
-                    LIMIT 3
-                    """,
-                    embedding_str,
-                )
-                logger.info(
-                    f"   ✅ Vector search returned {len(vector_results)} results"
-                )
+                try:
+                    # Use the actual ingestion service vector search with a real query
+                    test_query = "technology and artificial intelligence"
+                    vector_results = (
+                        await self.ingestion_service.vector_search_for_tenant(
+                            tenant_database_url=tenant_info.database_url,
+                            query=test_query,
+                            limit=3,
+                        )
+                    )
+                    logger.info(
+                        f"   ✅ Vector search returned {len(vector_results)} results"
+                    )
+                    for i, result in enumerate(vector_results):
+                        similarity = result.get("similarity", 0)
+                        content_preview = result.get("content", "")[:50]
+                        logger.info(
+                            f"      {i + 1}. Similarity: {similarity:.3f} - {content_preview}..."
+                        )
+                except Exception as e:
+                    logger.warning(f"   ⚠️ Vector search test failed: {e}")
+                    logger.info("   ✅ Vector search returned 0 results (test failed)")
 
             await conn.close()
 
@@ -542,7 +512,7 @@ class EndToEndWorkflowTester:
             # Authenticate
             authenticated_tenant = self._authenticate_request(api_key_info.api_key)
             if not authenticated_tenant:
-                logger.error(f"❌ Authentication failed")
+                logger.error("❌ Authentication failed")
                 continue
 
             for query in test_queries:
@@ -554,8 +524,12 @@ class EndToEndWorkflowTester:
 
         # Test vector search
         try:
-            vector_results = await self.tenant_manager.search_documents_with_embeddings(
-                tenant_id=tenant_id, query=query, limit=3, search_type="vector"
+            # Get tenant database URL
+            tenant_db_url = await self.tenant_manager.get_tenant_database_url(tenant_id)
+
+            # Use the correct vector search method from ingestion service
+            vector_results = await self.ingestion_service.vector_search_for_tenant(
+                tenant_database_url=tenant_db_url, query=query, limit=3
             )
             logger.info(f"      📊 Vector search: {len(vector_results)} results")
             for i, result in enumerate(vector_results):
@@ -569,8 +543,12 @@ class EndToEndWorkflowTester:
 
         # Test hybrid search
         try:
-            hybrid_results = await self.tenant_manager.search_documents_with_embeddings(
-                tenant_id=tenant_id, query=query, limit=3, search_type="hybrid"
+            # Get tenant database URL for hybrid search
+            tenant_db_url = await self.tenant_manager.get_tenant_database_url(tenant_id)
+
+            # Use the correct hybrid search method from ingestion service
+            hybrid_results = await self.ingestion_service.hybrid_search_for_tenant(
+                tenant_database_url=tenant_db_url, query=query, limit=3
             )
             logger.info(f"      📊 Hybrid search: {len(hybrid_results)} results")
             for i, result in enumerate(hybrid_results):
@@ -617,7 +595,7 @@ class EndToEndWorkflowTester:
         tenant_1_id = str(tenant_1["tenant_info"].tenant_id)
         tenant_2_id = str(tenant_2["tenant_info"].tenant_id)
 
-        logger.info(f"🔍 Testing isolation between:")
+        logger.info("🔍 Testing isolation between:")
         logger.info(f"   Tenant 1: {tenant_1['config']['name']} ({tenant_1_id})")
         logger.info(f"   Tenant 2: {tenant_2['config']['name']} ({tenant_2_id})")
 
@@ -669,7 +647,7 @@ class EndToEndWorkflowTester:
                 logger.error(f"      ❌ Found overlapping document IDs: {overlap}")
             else:
                 logger.info(
-                    f"      ✅ No overlapping document IDs - isolation confirmed"
+                    "      ✅ No overlapping document IDs - isolation confirmed"
                 )
 
         except Exception as e:
@@ -870,7 +848,7 @@ async def main():
 
     # Run workflow
     tester = EndToEndWorkflowTester()
-    created_tenants = await tester.run_complete_workflow()
+    await tester.run_complete_workflow()
 
     logger.info("\n🎉 End-to-End Workflow Completed Successfully!")
     logger.info("Check the log file 'end_to_end_workflow.log' for detailed output.")

@@ -1,0 +1,128 @@
+# Multi-Tenant RAG System Requirements
+# Core dependencies for production deployment - based on working requirements_final.txt
+
+# ============================================================================
+# CORE AI AND GRAPHITI DEPENDENCIES
+# ============================================================================
+
+# Graphiti core with Google Gemini support (using working version)
+graphiti-core[google-genai]==0.18.0
+
+# Pydantic AI framework (using working versions)
+pydantic-ai==0.3.2
+
+# Google Gemini API (using working versions)
+google-genai>=1.16.1
+google-auth>=2.40.0
+
+# ============================================================================
+# WEB FRAMEWORK AND API
+# ============================================================================
+
+# FastAPI and server components (using working versions)
+fastapi>=0.115.13
+uvicorn>=0.34.3
+starlette>=0.46.2
+python-multipart>=0.0.20
+
+# HTTP clients and networking (using working versions)
+httpx>=0.28.1
+requests>=2.32.4
+
+# ============================================================================
+# DATABASE AND STORAGE
+# ============================================================================
+
+# Neo4j graph database (using working version)
+neo4j>=5.28.0
+
+# PostgreSQL/Neon database (using working versions)
+asyncpg>=0.30.0
+psycopg2-binary>=2.9.9
+
+# ============================================================================
+# CORE PYTHON DEPENDENCIES
+# ============================================================================
+
+# Pydantic and validation (using working versions)
+pydantic>=2.11.7
+pydantic-settings>=2.10.0
+
+# Environment and configuration
+python-dotenv>=1.1.0
+
+# ============================================================================
+# AUTHENTICATION AND SECURITY
+# ============================================================================
+
+# JWT and authentication
+python-jose[cryptography]>=3.3.0
+passlib[bcrypt]>=1.7.4
+
+# Date utilities
+python-dateutil>=2.9.0
+
+# ============================================================================
+# DATA PROCESSING AND UTILITIES
+# ============================================================================
+
+# Numerical and data processing
+numpy>=2.3.1
+
+# Text processing
+tiktoken>=0.5.2
+
+# YAML processing (using working version from requirements_final.txt)
+PyYAML>=6.0.2
+
+# ============================================================================
+# ASYNC AND CONCURRENCY
+# ============================================================================
+
+# Async utilities
+anyio>=4.9.0
+tenacity>=9.0.0
+
+# ============================================================================
+# CLI AND USER INTERFACE
+# ============================================================================
+
+# Rich text formatting (using working versions)
+rich>=14.0.0
+
+# CLI utilities
+click>=8.2.1
+
+# ============================================================================
+# DEVELOPMENT AND TESTING
+# ============================================================================
+
+# Testing framework (using working versions)
+pytest>=8.4.1
+pytest-asyncio>=1.0.0
+pytest-mock>=3.12.0
+
+# ============================================================================
+# SPECIALIZED DEPENDENCIES FOR MULTI-TENANT
+# ============================================================================
+
+# Enhanced monitoring for multi-tenant operations
+structlog>=23.2.0
+
+# Circuit breaker for external API calls (Neon API)
+circuitbreaker>=2.0.0
+backoff>=2.2.1
+
+# Caching and performance
+cachetools>=5.5.2
+
+# ============================================================================
+# NOTES:
+# ============================================================================
+# 
+# This requirements.txt:
+# 1. Uses all working versions from requirements_final.txt
+# 2. Adds only essential multi-tenant specific dependencies
+# 3. Maintains compatibility with existing single-tenant system
+# 4. Includes necessary tools for Neon API integration
+# 5. Provides enhanced monitoring and error handling for multi-tenant operations

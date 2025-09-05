@@ -165,7 +165,7 @@ class TenantSchemaInitializer:
     -- Vector search function for semantic similarity
     CREATE OR REPLACE FUNCTION match_chunks(
         query_embedding VECTOR(768),
-        match_threshold FLOAT DEFAULT 0.7,
+        match_threshold FLOAT DEFAULT 0.5,
         match_count INTEGER DEFAULT 10,
         filter_document_id UUID DEFAULT NULL
     )
@@ -198,7 +198,7 @@ class TenantSchemaInitializer:
             c.embedding IS NOT NULL
             AND 1 - (c.embedding <=> query_embedding) > match_threshold
             AND (filter_document_id IS NULL OR c.document_id = filter_document_id)
-        ORDER BY c.embedding <=> query_embedding
+        ORDER BY (1 - (c.embedding <=> query_embedding)) DESC
         LIMIT match_count;
     $$;
     
@@ -265,7 +265,7 @@ class TenantSchemaInitializer:
         query_embedding VECTOR(768),
         text_weight FLOAT DEFAULT 0.3,
         vector_weight FLOAT DEFAULT 0.7,
-        match_threshold FLOAT DEFAULT 0.7,
+        match_threshold FLOAT DEFAULT 0.5,
         max_results INTEGER DEFAULT 10
     )
     RETURNS TABLE (
@@ -315,71 +315,6 @@ class TenantSchemaInitializer:
             (COALESCE(t.text_rank, 0) * text_weight + COALESCE(v.vector_rank, 0) * vector_weight) as combined_score,
             COALESCE(t.text_rank, 0) as text_score,
             COALESCE(v.vector_rank, 0) as vector_score,
-            COALESCE(t.metadata, v.metadata) as metadata,
-            COALESCE(t.document_title, v.document_title) as document_title,
-            COALESCE(t.document_source, v.document_source) as document_source
-        FROM text_results t
-        FULL OUTER JOIN vector_results v ON t.chunk_id = v.chunk_id
-        ORDER BY combined_score DESC
-        LIMIT max_results;
-    $$;
-    
-    -- Hybrid search function (combines vector and text search)
-    CREATE OR REPLACE FUNCTION hybrid_search(
-        search_text TEXT,
-        query_embedding VECTOR(768),
-        text_weight FLOAT DEFAULT 0.3,
-        vector_weight FLOAT DEFAULT 0.7,
-        match_threshold FLOAT DEFAULT 0.7,
-        max_results INTEGER DEFAULT 10
-    )
-    RETURNS TABLE (
-        chunk_id UUID,
-        document_id UUID,
-        content TEXT,
-        combined_score FLOAT,
-        text_score FLOAT,
-        vector_score FLOAT,
-        metadata JSONB,
-        document_title TEXT,
-        document_source TEXT
-    )
-    LANGUAGE SQL STABLE
-    AS $$
-        WITH text_results AS (
-            SELECT 
-                c.id as chunk_id,
-                c.document_id,
-                c.content,
-                c.metadata,
-                d.title as document_title,
-                d.source as document_source,
-                ts_rank_cd(to_tsvector('english', c.content), plainto_tsquery('english', search_text)) AS text_rank
-            FROM chunks c
-            JOIN documents d ON c.document_id = d.id
-            WHERE to_tsvector('english', c.content) @@ plainto_tsquery('english', search_text)
-        ),
-        vector_results AS (
-            SELECT 
-                c.id as chunk_id,
-                c.document_id,
-                c.content,
-                c.metadata,
-                d.title as document_title,
-                d.source as document_source,
-                1 - (c.embedding <=> query_embedding) AS vector_similarity
-            FROM chunks c
-            JOIN documents d ON c.document_id = d.id
-            WHERE c.embedding IS NOT NULL
-              AND 1 - (c.embedding <=> query_embedding) > match_threshold
-        )
-        SELECT 
-            COALESCE(t.chunk_id, v.chunk_id) as chunk_id,
-            COALESCE(t.document_id, v.document_id) as document_id,
-            COALESCE(t.content, v.content) as content,
-            COALESCE(t.text_rank, 0) * text_weight + COALESCE(v.vector_similarity, 0) * vector_weight AS combined_score,
-            COALESCE(t.text_rank, 0) as text_score,
-            COALESCE(v.vector_similarity, 0) as vector_score,
             COALESCE(t.metadata, v.metadata) as metadata,
             COALESCE(t.document_title, v.document_title) as document_title,
             COALESCE(t.document_source, v.document_source) as document_source

@@ -35,6 +35,12 @@ class TenantIngestionResult(BaseModel):
     processing_time_ms: float = Field(
         ..., description="Processing time in milliseconds"
     )
+    vector_stored: bool = Field(
+        default=True, description="Whether vector embeddings were stored successfully"
+    )
+    graph_stored: bool = Field(
+        default=False, description="Whether graph data was stored successfully"
+    )
     graph_episode_created: bool = Field(
         ..., description="Whether graph episode was created"
     )

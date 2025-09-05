@@ -8,9 +8,14 @@ import uuid
 import time
 import json
 import asyncio
-from typing import Any, Dict, Optional
+import sys
+import os
+from typing import Any, Dict, Optional, List
 from datetime import datetime
 import asyncpg
+
+# Add parent directory for imports
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from tenant_ingestion_models import (
     DocumentInput,
@@ -24,90 +29,11 @@ from tenant_ingestion_models import (
 from tenant_manager import TenantManager
 from tenant_graphiti_client import GraphEpisode
 
+# Import the proper chunker and embedder from ingestion module
+from ingestion.chunker import SemanticChunker, ChunkingConfig
+from ingestion.embedder import EmbeddingGenerator
+
 logger = logging.getLogger(__name__)
-
-
-class SimpleEmbedder:
-    """Simple embedder for testing - replace with real embedder in production."""
-
-    async def create_chunks(self, content: str) -> list[DocumentChunk]:
-        """
-        Create chunks from document content.
-
-        Args:
-            content: Document content to chunk
-
-        Returns:
-            List of DocumentChunk objects
-        """
-        # Simple chunking by sentences/paragraphs
-        sentences = content.split(".")
-        chunks = []
-
-        current_chunk = ""
-        for sentence in sentences:
-            sentence = sentence.strip()
-            if not sentence:
-                continue
-
-            if len(current_chunk) + len(sentence) > 1000:  # Max chunk size
-                if current_chunk:
-                    chunks.append(
-                        DocumentChunk(
-                            content=current_chunk.strip(),
-                            token_count=len(current_chunk.split()),
-                            metadata={"chunk_method": "sentence_split"},
-                        )
-                    )
-                current_chunk = sentence + "."
-            else:
-                current_chunk += sentence + "."
-
-        # Add final chunk
-        if current_chunk:
-            chunks.append(
-                DocumentChunk(
-                    content=current_chunk.strip(),
-                    token_count=len(current_chunk.split()),
-                    metadata={"chunk_method": "sentence_split"},
-                )
-            )
-
-        return (
-            chunks
-            if chunks
-            else [
-                DocumentChunk(
-                    content=content,
-                    token_count=len(content.split()),
-                    metadata={"chunk_method": "full_document"},
-                )
-            ]
-        )
-
-    async def generate_embedding(self, text: str) -> list[float]:
-        """
-        Generate embedding for text.
-
-        Args:
-            text: Text to embed
-
-        Returns:
-            Embedding vector (mock for testing)
-        """
-        # Mock embedding - in production, use real embedder
-        import hashlib
-
-        hash_obj = hashlib.md5(text.encode())
-        hash_int = int(hash_obj.hexdigest(), 16)
-
-        # Generate consistent 768-dimensional vector
-        embedding = []
-        for i in range(768):
-            embedding.append((hash_int % 1000) / 1000.0 - 0.5)
-            hash_int = hash_int // 1000 + i
-
-        return embedding
 
 
 class TenantDataIngestionService:
@@ -123,17 +49,38 @@ class TenantDataIngestionService:
     """
 
     def __init__(
-        self, tenant_manager: TenantManager, embedder_service: SimpleEmbedder = None
+        self,
+        tenant_manager: TenantManager,
+        chunker: SemanticChunker = None,
+        embedder: EmbeddingGenerator = None,
     ):
         """
         Initialize ingestion service.
 
         Args:
             tenant_manager: TenantManager instance for tenant operations
-            embedder_service: Service for creating embeddings (optional, will create simple one)
+            chunker: SemanticChunker for document chunking (optional, will create default)
+            embedder: EmbeddingGenerator for creating embeddings (optional, will create default)
         """
         self.tenant_manager = tenant_manager
-        self.embedder = embedder_service or SimpleEmbedder()
+
+        # Initialize chunker with proper configuration
+        if chunker is None:
+            chunking_config = ChunkingConfig(
+                chunk_size=800,  # Optimized for Gemini
+                chunk_overlap=150,
+                use_semantic_splitting=True,
+                preserve_structure=True,
+            )
+            self.chunker = SemanticChunker(chunking_config)
+        else:
+            self.chunker = chunker
+
+        # Initialize embedder
+        if embedder is None:
+            self.embedder = EmbeddingGenerator()
+        else:
+            self.embedder = embedder
 
     async def ingest_document_for_tenant(
         self, tenant_id: str, document: DocumentInput
@@ -190,6 +137,9 @@ class TenantDataIngestionService:
                 title=document.title,
                 chunks_created=chunks_created,
                 processing_time_ms=processing_time,
+                vector_stored=chunks_created
+                > 0,  # True if chunks with embeddings were created
+                graph_stored=graph_episode_created,  # Use graph_episode_created status
                 graph_episode_created=graph_episode_created,
                 graph_episode_id=graph_episode_id if graph_episode_created else None,
                 errors=[],
@@ -218,6 +168,8 @@ class TenantDataIngestionService:
                 title=document.title,
                 chunks_created=0,
                 processing_time_ms=processing_time,
+                vector_stored=False,
+                graph_stored=False,
                 graph_episode_created=False,
                 errors=[str(e)],
             )
@@ -296,27 +248,50 @@ class TenantDataIngestionService:
             Exception: If chunk processing fails
         """
         try:
-            # Create chunks
-            chunks = await self.embedder.create_chunks(document.content)
+            # Create chunks using the proper semantic chunker
+            logger.info(f"Creating chunks for document: {document.title}")
+            chunk_objects = await self.chunker.chunk_document(
+                content=document.content,
+                title=document.title,
+                source=document.source,
+                metadata=document.metadata,
+            )
+
+            # Generate embeddings for chunks
+            logger.info(f"Generating embeddings for {len(chunk_objects)} chunks")
+            embedded_chunks = await self.embedder.embed_chunks(chunk_objects)
 
             # Connect to tenant's database
             conn = await asyncpg.connect(deps.tenant_database_url)
 
             try:
                 chunks_created = 0
-                for i, chunk in enumerate(chunks):
-                    # Generate embedding (skip for now - schema doesn't support it)
-                    # embedding = await self.embedder.generate_embedding(chunk.content)
+                for i, chunk in enumerate(embedded_chunks):
+                    # Get the embedding vector
+                    embedding_vector = getattr(chunk, "embedding", None)
+                    if embedding_vector is None:
+                        logger.warning(f"No embedding for chunk {i}, generating one...")
+                        embedding_vector = await self.embedder.generate_embedding(
+                            chunk.content
+                        )
 
-                    # Store chunk (without embedding for now - schema doesn't support it)
+                    # Convert embedding list to PostgreSQL vector format
+                    if isinstance(embedding_vector, list):
+                        # Convert list to string format for pgvector: [1.0,2.0,3.0]
+                        embedding_str = "[" + ",".join(map(str, embedding_vector)) + "]"
+                    else:
+                        embedding_str = str(embedding_vector)
+
+                    # Store chunk with embedding using proper vector cast
                     await conn.execute(
                         """
-                        INSERT INTO chunks (id, document_id, content, chunk_index, token_count, metadata)
-                        VALUES ($1, $2, $3, $4, $5, $6)
+                        INSERT INTO chunks (id, document_id, content, embedding, chunk_index, token_count, metadata)
+                        VALUES ($1, $2, $3, $4::vector, $5, $6, $7)
                     """,
                         str(uuid.uuid4()),
                         document_id,
                         chunk.content,
+                        embedding_str,  # Use properly formatted embedding string with ::vector cast
                         i,
                         chunk.token_count,
                         json.dumps(chunk.metadata) if chunk.metadata else "{}",
@@ -368,8 +343,13 @@ class TenantDataIngestionService:
             # Generate tenant namespace for proper isolation
             namespace = f"tenant_{deps.tenant_id}"
 
-            # Create chunks from document content (similar to single-tenant)
-            chunks = await self.embedder.create_chunks(document.content)
+            # Create chunks from document content using proper chunker
+            chunks = await self.chunker.chunk_document(
+                content=document.content,
+                title=document.title,
+                source=document.source,
+                metadata=document.metadata or {},
+            )
 
             if not chunks:
                 logger.warning(f"No chunks created for document {document_id}")
@@ -824,3 +804,169 @@ class TenantDataIngestionService:
                 f"Failed to get document stats for tenant {tenant_id}: {str(e)}"
             )
             raise
+
+    async def vector_search_for_tenant(
+        self, tenant_database_url: str, query: str, limit: int = 10
+    ) -> List[Dict[str, Any]]:
+        """
+        Perform vector search in a specific tenant's database.
+
+        Args:
+            tenant_database_url: Database URL for the tenant's dedicated DB
+            query: Search query
+            limit: Maximum number of results
+
+        Returns:
+            List of search results
+        """
+        try:
+            # Generate embedding for query
+            query_embedding = await self.embedder.embed_query(query)
+
+            # Connect to tenant database
+            conn = await asyncpg.connect(tenant_database_url)
+
+            try:
+                # Try vector search using the match_chunks function
+                results = await conn.fetch(
+                    "SELECT * FROM match_chunks($1::vector, $2::float, $3::int, $4::uuid)",
+                    "[" + ",".join(map(str, query_embedding)) + "]",
+                    0.5,  # match_threshold
+                    limit,  # match_count
+                    None,  # filter_document_id
+                )
+
+                return [
+                    {
+                        "chunk_id": str(row["chunk_id"]),
+                        "document_id": str(row["document_id"]),
+                        "content": row["content"],
+                        "similarity": float(row["similarity"]),
+                        "metadata": json.loads(row["metadata"])
+                        if row["metadata"]
+                        else {},
+                        "document_title": row["document_title"],
+                        "document_source": row["document_source"],
+                    }
+                    for row in results
+                ]
+
+            finally:
+                await conn.close()
+
+        except Exception as e:
+            logger.error(f"Vector search failed for tenant: {e}")
+            # Fallback to text search
+            return await self._text_search_fallback(tenant_database_url, query, limit)
+
+    async def _text_search_fallback(
+        self, tenant_database_url: str, query: str, limit: int
+    ) -> List[Dict[str, Any]]:
+        """Fallback text search if vector search fails"""
+
+        conn = await asyncpg.connect(tenant_database_url)
+
+        try:
+            results = await conn.fetch(
+                """
+                SELECT c.id as chunk_id, c.document_id, c.content, 
+                       c.chunk_index, c.token_count, c.metadata,
+                       d.title as document_title, d.source as document_source,
+                       0.5 as similarity
+                FROM chunks c
+                JOIN documents d ON c.document_id = d.id
+                WHERE c.content ILIKE '%' || $1 || '%'
+                ORDER BY c.chunk_index
+                LIMIT $2
+                """,
+                query,
+                limit,
+            )
+
+            return [
+                {
+                    "chunk_id": str(row["chunk_id"]),
+                    "document_id": str(row["document_id"]),
+                    "content": row["content"],
+                    "similarity": float(row["similarity"]),
+                    "chunk_index": row["chunk_index"],
+                    "token_count": row["token_count"],
+                    "metadata": json.loads(row["metadata"]) if row["metadata"] else {},
+                    "document_title": row["document_title"],
+                    "document_source": row["document_source"],
+                }
+                for row in results
+            ]
+
+        finally:
+            await conn.close()
+
+    async def hybrid_search_for_tenant(
+        self,
+        tenant_database_url: str,
+        query: str,
+        limit: int = 10,
+        text_weight: float = 0.3,
+        vector_weight: float = 0.7,
+    ) -> List[Dict[str, Any]]:
+        """
+        Perform hybrid search (vector + text) in a specific tenant's database.
+
+        Args:
+            tenant_database_url: Database URL for the tenant's dedicated DB
+            query: Search query
+            limit: Maximum number of results
+            text_weight: Weight for text similarity
+            vector_weight: Weight for vector similarity
+
+        Returns:
+            List of search results with combined scores
+        """
+        try:
+            # Generate embedding for query
+            query_embedding = await self.embedder.embed_query(query)
+
+            # Connect to tenant database
+            conn = await asyncpg.connect(tenant_database_url)
+
+            try:
+                # Use hybrid search function with correct parameter order
+                # Database function signature: hybrid_search(search_text text, query_embedding vector, text_weight, vector_weight, match_threshold, max_results)
+                results = await conn.fetch(
+                    "SELECT * FROM hybrid_search($1::text, $2::vector, $3::float, $4::float, $5::float, $6::int)",
+                    query,
+                    "[" + ",".join(map(str, query_embedding)) + "]",
+                    text_weight,
+                    1.0 - text_weight,  # vector_weight
+                    0.5,  # match_threshold
+                    limit,  # max_results
+                )
+
+                return [
+                    {
+                        "chunk_id": str(row["chunk_id"]),
+                        "document_id": str(row["document_id"]),
+                        "content": row["content"],
+                        "combined_score": float(row["combined_score"]),
+                        "vector_similarity": float(row["vector_score"]),
+                        "text_similarity": float(row["text_score"]),
+                        "metadata": json.loads(row["metadata"])
+                        if row["metadata"]
+                        else {},
+                        "document_title": row["document_title"],
+                        "document_source": row["document_source"],
+                    }
+                    for row in results
+                ]
+
+            finally:
+                await conn.close()
+
+        except Exception as e:
+            logger.error(f"Hybrid search failed for tenant: {e}")
+            # Fallback to vector search only
+            return await self.vector_search_for_tenant(
+                tenant_database_url, query, limit
+            )
+
+    # ...existing methods...
