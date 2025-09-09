@@ -445,7 +445,6 @@ class TenantSecurityManager:
                 {"permission": required_permission, "resource_id": resource_id},
             )
             return True
-
         except Exception as e:
             logger.error(f"Access validation error: {e}")
             return False
@@ -500,6 +499,213 @@ class TenantSecurityManager:
             logs = [log for log in logs if log["action"] == action]
 
         return logs[-limit:]
+
+
+class JWTAuthenticator:
+    """
+    Simple JWT authenticator for multi-tenant systems.
+    This is a wrapper around JWTManager for easier integration.
+    """
+
+    def __init__(self, secret_key: str = None):
+        """Initialize JWT authenticator with secret key."""
+        import os
+
+        # Use provided secret key or get from environment
+        self.secret_key = secret_key or os.getenv(
+            "JWT_SECRET_KEY", "your-secret-key-change-in-production"
+        )
+
+        # Initialize JWT manager
+        self.jwt_manager = JWTManager(
+            secret_key=self.secret_key,
+            algorithm="HS256",
+            token_expiry_hours=24,
+            refresh_expiry_days=7,
+        )
+
+        # Initialize security manager
+        self.security_manager = TenantSecurityManager(self.jwt_manager)
+
+        logger.info("JWT Authenticator initialized")
+
+    def create_token(self, token_data: Dict[str, Any]) -> str:
+        """
+        Create a JWT token from token data.
+
+        Args:
+            token_data: Dictionary containing tenant_id, user_id, permissions, etc.
+
+        Returns:
+            JWT token string
+        """
+        try:
+            return self.jwt_manager.create_access_token(
+                tenant_id=token_data.get("tenant_id"),
+                user_id=token_data.get("user_id"),
+                permissions=token_data.get("permissions", ["read"]),
+                metadata=token_data.get("metadata", {}),
+            )
+        except Exception as e:
+            logger.error(f"Failed to create token: {e}")
+            raise
+
+    def decode_token(self, token: str) -> Dict[str, Any]:
+        """
+        Decode and validate a JWT token.
+
+        Args:
+            token: JWT token string
+
+        Returns:
+            Decoded token payload
+
+        Raises:
+            JWTError: If token is invalid or expired
+        """
+        try:
+            return self.jwt_manager.verify_token(token)
+        except Exception as e:
+            logger.error(f"Failed to decode token: {e}")
+            raise
+
+    def get_tenant_context(self, token: str) -> TenantContext:
+        """
+        Extract tenant context from JWT token.
+
+        Args:
+            token: JWT token string
+
+        Returns:
+            TenantContext object
+        """
+        try:
+            return self.jwt_manager.extract_tenant_context(token)
+        except Exception as e:
+            logger.error(f"Failed to extract tenant context: {e}")
+            raise
+
+    def validate_api_key(self, tenant_id: str, api_key: str) -> bool:
+        """
+        Validate API key for a tenant.
+        This is a simple implementation - in production, use proper key management.
+
+        Args:
+            tenant_id: Tenant identifier
+            api_key: API key to validate
+
+        Returns:
+            True if valid, False otherwise
+        """
+        # Simple validation: api_key should be "api_key_{tenant_id}"
+        expected_key = f"api_key_{tenant_id}"
+        is_valid = api_key == expected_key
+
+        if is_valid:
+            logger.info(f"API key validated successfully for tenant {tenant_id}")
+        else:
+            logger.warning(f"Invalid API key for tenant {tenant_id}")
+
+        return is_valid
+
+    def authenticate_tenant(
+        self, tenant_id: str, user_id: str, api_key: str
+    ) -> Optional[str]:
+        """
+        Authenticate a tenant and return JWT token.
+
+        Args:
+            tenant_id: Tenant identifier
+            user_id: User identifier
+            api_key: API key for authentication
+
+        Returns:
+            JWT token if authentication successful, None otherwise
+        """
+        try:
+            # Validate API key
+            if not self.validate_api_key(tenant_id, api_key):
+                return None
+
+            # Create token data
+            token_data = {
+                "tenant_id": tenant_id,
+                "user_id": user_id,
+                "permissions": ["read", "write"],  # Default permissions
+                "metadata": {
+                    "auth_method": "api_key",
+                    "authenticated_at": datetime.utcnow().isoformat(),
+                },
+            }
+
+            # Create and return token
+            return self.create_token(token_data)
+
+        except Exception as e:
+            logger.error(f"Authentication failed for tenant {tenant_id}: {e}")
+            return None
+
+    def refresh_token(self, refresh_token: str) -> Optional[str]:
+        """
+        Refresh an access token using a refresh token.
+
+        Args:
+            refresh_token: Refresh token string
+
+        Returns:
+            New access token if successful, None otherwise
+        """
+        try:
+            return self.jwt_manager.refresh_access_token(refresh_token)
+        except Exception as e:
+            logger.error(f"Token refresh failed: {e}")
+            return None
+
+    def is_token_valid(self, token: str) -> bool:
+        """
+        Check if a token is valid without decoding it fully.
+
+        Args:
+            token: JWT token string
+
+        Returns:
+            True if valid, False otherwise
+        """
+        try:
+            self.jwt_manager.verify_token(token)
+            return True
+        except Exception:
+            return False
+
+    def get_token_info(self, token: str) -> Optional[Dict[str, Any]]:
+        """
+        Get information about a token without throwing exceptions.
+
+        Args:
+            token: JWT token string
+
+        Returns:
+            Token information dict or None if invalid
+        """
+        try:
+            payload = self.decode_token(token)
+            return {
+                "tenant_id": payload.get("tenant_id"),
+                "user_id": payload.get("user_id"),
+                "permissions": payload.get("permissions", []),
+                "expires_at": (
+                    datetime.fromtimestamp(payload.get("exp", 0)).isoformat()
+                    if payload.get("exp")
+                    else None
+                ),
+                "issued_at": (
+                    datetime.fromtimestamp(payload.get("iat", 0)).isoformat()
+                    if payload.get("iat")
+                    else None
+                ),
+            }
+        except Exception:
+            return None
 
 
 # Convenience functions and decorators
