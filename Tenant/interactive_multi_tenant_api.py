@@ -48,16 +48,55 @@ except ImportError as e:
     print("Please ensure the agent folder is properly configured")
     sys.exit(1)
 
-# Configure logging
+# Configure comprehensive logging like the reference comprehensive agent
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     handlers=[
-        logging.FileHandler("interactive_multi_tenant_api.log"),
-        logging.StreamHandler(),
+        logging.StreamHandler(),  # Console output for API terminal visibility
+        logging.FileHandler("interactive_multi_tenant_api.log"),  # Single log file
     ],
 )
 logger = logging.getLogger(__name__)
+
+# Configure all backend loggers to show in API terminal and log file
+# This captures activity from both API operations and CLI operations
+backend_loggers = [
+    "multi_tenant_agent",
+    "tenant_graphiti_client", 
+    "tenant_data_ingestion_service",
+    "tenant_manager",
+    "auth_middleware",
+    "catalog_database",
+    "google_genai",
+    "httpx",
+    "neo4j",
+    "ingestion"
+]
+
+for logger_name in backend_loggers:
+    backend_logger = logging.getLogger(logger_name)
+    backend_logger.setLevel(logging.INFO)
+    
+    # Ensure logs appear in API terminal (don't add duplicate handlers)
+    if not any(isinstance(h, logging.StreamHandler) for h in backend_logger.handlers):
+        console_handler = logging.StreamHandler()
+        console_handler.setLevel(logging.INFO)
+        console_formatter = logging.Formatter(
+            "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+        )
+        console_handler.setFormatter(console_formatter)
+        backend_logger.addHandler(console_handler)
+    
+    # Ensure logs go to the single API log file
+    if not any(isinstance(h, logging.FileHandler) for h in backend_logger.handlers):
+        file_handler = logging.FileHandler("interactive_multi_tenant_api.log")
+        file_handler.setLevel(logging.INFO)
+        file_formatter = logging.Formatter(
+            "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+        )
+        file_handler.setFormatter(file_formatter)
+        backend_logger.addHandler(file_handler)
 
 # Security scheme
 security = HTTPBearer()
@@ -97,9 +136,19 @@ async def lifespan(app: FastAPI):
         )
         logger.info("Tenant manager initialized")
 
+        # Initialize ingestion service for tenant-aware searches
+        from tenant_data_ingestion_service import TenantDataIngestionService
+        tenant_manager.ingestion_service = TenantDataIngestionService(
+            tenant_manager=tenant_manager
+        )
+        logger.info("Tenant ingestion service initialized")
+
         # Initialize JWT authenticator
         jwt_authenticator = JWTAuthenticator()
         logger.info("JWT authenticator initialized")
+
+        logger.info("🎯 Multi-Tenant RAG API ready - all backend logs will appear in this terminal")
+        logger.info("📊 Backend activity from CLI and API operations will be shown below:")
 
         yield
 

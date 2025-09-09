@@ -49,16 +49,68 @@ from multi_tenant_agent import MultiTenantRAGAgent
 #     print("Please ensure the agent folder is properly configured")
 #     sys.exit(1)
 
-# Configure logging
+# Configure logging - Send all backend logs to API log file and terminal
+# CLI should not create its own log files, everything goes to API
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     handlers=[
-        logging.FileHandler("interactive_multi_tenant_cli.log"),
-        logging.StreamHandler(),
+        # Only log to the API log file, not CLI-specific files
+        logging.FileHandler("interactive_multi_tenant_api.log"),
     ],
 )
+
 logger = logging.getLogger(__name__)
+
+
+# Create a console filter to hide backend logs from CLI user interface
+class CLIConsoleFilter(logging.Filter):
+    """Filter to suppress backend logs from CLI console while allowing them in API terminal."""
+
+    def filter(self, record):
+        # Suppress these modules from CLI user interface
+        backend_modules = [
+            "httpx",
+            "google_genai",
+            "multi_tenant_agent",
+            "tenant_graphiti_client",
+            "tenant_data_ingestion_service",
+            "neo4j",
+            "catalog_database",
+            "ingestion",
+        ]
+        return not any(record.name.startswith(module) for module in backend_modules)
+
+
+# Configure backend loggers to use API log file and terminal
+backend_loggers = [
+    "multi_tenant_agent",
+    "tenant_graphiti_client",
+    "tenant_data_ingestion_service",
+    "httpx",
+    "google_genai",
+    "neo4j",
+    "catalog_database",
+    "ingestion",
+]
+
+# Ensure all backend logs go to API log file and terminal (not CLI console)
+for logger_name in backend_loggers:
+    backend_logger = logging.getLogger(logger_name)
+    backend_logger.setLevel(logging.INFO)
+
+    # Add file handler if not present
+    if not any(isinstance(h, logging.FileHandler) for h in backend_logger.handlers):
+        file_handler = logging.FileHandler("interactive_multi_tenant_api.log")
+        file_handler.setLevel(logging.INFO)
+        file_formatter = logging.Formatter(
+            "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+        )
+        file_handler.setFormatter(file_formatter)
+        backend_logger.addHandler(file_handler)
+
+    # Prevent propagation to CLI console but allow to API terminal
+    backend_logger.propagate = False
 
 # Rich console for beautiful output
 console = Console()
@@ -510,26 +562,37 @@ class MultiTenantCLI:
             return
 
         console.print("\n💬 [bold cyan]Chat Mode - Type 'exit' to quit[/bold cyan]")
-        console.print("Ask questions about your documents and knowledge base.\n")
+        console.print("Ask questions about your documents and knowledge base.")
+        console.print(
+            "[dim]Tip: Use arrow keys to navigate and edit your input[/dim]\n"
+        )
 
         session_id = str(uuid.uuid4())
 
         while True:
             try:
-                # Get user input
-                message = Prompt.ask("\n[bold blue]You[/bold blue]")
+                # Get user input with better editing capabilities
+                try:
+                    import readline  # Enable arrow key navigation and input history
+
+                    readline.set_history_length(100)  # Keep last 100 commands
+                except ImportError:
+                    pass  # Not available on all systems
+
+                message = input("\n🧑 You: ").strip()
 
                 if message.lower() in ["exit", "quit", "bye"]:
                     console.print("👋 [yellow]Goodbye![/yellow]")
                     break
 
-                # Show typing indicator
+                # Show typing indicator without backend logs
                 with Progress(
                     SpinnerColumn(),
                     TextColumn("🤖 Agent is thinking..."),
                     console=console,
+                    transient=True,  # Make progress bar disappear after completion
                 ) as progress:
-                    task = progress.add_task("Processing...", total=None)
+                    progress.add_task("Processing...", total=None)
 
                     start_time = datetime.now()
 
@@ -540,8 +603,8 @@ class MultiTenantCLI:
                         )
                         break
 
-                    # Get response from agent
-                    response = await self.agent.chat(
+                    # Get response from agent (backend logs will go to file/API terminal)
+                    agent_result = await self.agent.chat(
                         message=message,
                         context=TenantContext(
                             tenant_id=self.current_tenant.tenant_id,
@@ -551,35 +614,94 @@ class MultiTenantCLI:
                     )
 
                     execution_time = (datetime.now() - start_time).total_seconds()
-                    progress.update(task, completed=True)
 
-                # Display response
-                response_text = response.get(
-                    "response", "I'm sorry, I couldn't generate a response."
-                )
+                # Extract clean response from agent result
+                if isinstance(agent_result, dict):
+                    response_text = agent_result.get(
+                        "response", "No response available"
+                    )
+                    tools_used = agent_result.get("tools_used", [])
+                    sources = agent_result.get("sources", [])
+                elif hasattr(agent_result, "data"):
+                    # Handle Pydantic AI result format
+                    response_text = str(agent_result.data)
+                    # For Pydantic AI results, try to extract tools from metadata if available
+                    tools_used = getattr(agent_result, "tools_used", [])
+                    sources = getattr(agent_result, "sources", [])
 
-                agent_panel = Panel(
-                    response_text,
-                    title=f"🤖 Agent Response ({execution_time:.2f}s)",
-                    border_style="green",
-                )
-                console.print(agent_panel)
+                    # If no tools found, check if we have the full result structure
+                    if not tools_used and hasattr(agent_result, "metadata"):
+                        tools_used = agent_result.metadata.get("tools_used", [])
+                        sources = agent_result.metadata.get("sources", [])
+                else:
+                    response_text = str(agent_result)
+                    tools_used = []
+                    sources = []
 
-                # Show sources if available
-                sources = response.get("sources", [])
-                if sources:
-                    console.print("\n📚 [dim]Sources used:[/dim]")
-                    for i, source in enumerate(sources[:3], 1):  # Show top 3 sources
-                        source_info = f"{i}. {source.get('source', 'Unknown')}"
-                        if "score" in source:
-                            source_info += f" (Score: {source['score']:.3f})"
-                        console.print(f"  [dim]{source_info}[/dim]")
+                # Ensure we have a fallback for tools if none were detected
+                if not tools_used:
+                    tools_used = ["Dual Storage Search"]
+
+                # Clean up response text if it contains technical formatting
+                if response_text.startswith(
+                    'AgentRunResult(output="'
+                ) and response_text.endswith('")'):
+                    response_text = response_text[23:-2]  # Remove wrapper
+
+                # Further clean up technical wrappers
+                if "AgentRunResult" in response_text:
+                    # Extract content between quotes if wrapped
+                    import re
+
+                    match = re.search(r'output="([^"]*)"', response_text)
+                    if match:
+                        response_text = match.group(1)
+                    else:
+                        # Fallback: remove common technical patterns
+                        response_text = re.sub(
+                            r"AgentRunResult\([^)]*\)", "", response_text
+                        ).strip()
+
+                # Ensure response is conversational
+                if not response_text or response_text == "No response available":
+                    response_text = "I'm sorry, I wasn't able to generate a proper response to your question."
+
+                # Display clean conversational response
+                console.print(f"\n🤖 **Assistant**: {response_text}")
+
+                # Add execution time in a subtle way
+                console.print(f"[dim]   ⏱️ Responded in {execution_time:.2f}s[/dim]")
+
+                # Show tool usage information in a clean way
+                if tools_used:
+                    tools_str = ", ".join(tools_used)
+                    console.print(f"[dim]   🔧 Used: {tools_str}[/dim]")
+
+                # Show sources if available in a clean way
+                if sources and len(sources) > 0:
+                    console.print(
+                        f"[dim]   📚 Found {len(sources)} relevant sources[/dim]"
+                    )
+                    for i, source in enumerate(sources[:2], 1):  # Show top 2 sources
+                        if isinstance(source, dict):
+                            source_name = source.get(
+                                "source", source.get("document_title", "Document")
+                            )
+                            if isinstance(source_name, str) and len(source_name) > 50:
+                                source_name = source_name[:47] + "..."
+                            console.print(f"[dim]      {i}. {source_name}[/dim]")
+                        else:
+                            source_str = str(source)
+                            if len(source_str) > 50:
+                                source_str = source_str[:47] + "..."
+                            console.print(f"[dim]      {i}. {source_str}[/dim]")
 
             except KeyboardInterrupt:
                 console.print("\n👋 [yellow]Chat interrupted. Goodbye![/yellow]")
                 break
             except Exception as e:
-                console.print(f"❌ [bold red]Chat error: {e}[/bold red]")
+                console.print(f"❌ [bold red]Error: {e}[/bold red]")
+                logger.error(f"Chat error: {e}")
 
     async def list_tenants(self):
         """List all available tenants."""

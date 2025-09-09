@@ -14,11 +14,13 @@ from dataclasses import dataclass
 # Add parent directory to path for agent imports
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+# Import comprehensive system prompt for intelligent tool routing
+from system_promt import SYSTEM_PROMPT
+
 try:
     from pydantic_ai import Agent, RunContext
 
     # Import validated agent components from single-tenant system
-    from agent.prompts import SYSTEM_PROMPT
     from agent.providers import get_llm_model
     from agent.tools import (
         vector_search_tool,
@@ -56,31 +58,8 @@ except ImportError as e:
         def __init__(self, **kwargs):
             self.deps = None
 
-
-# Additional imports that might not be available
-if not PYDANTIC_AI_AVAILABLE:
-    # Mock the agent components if they're not available
-    try:
-        from agent.prompts import SYSTEM_PROMPT
-        from agent.providers import get_llm_model
-        from agent.tools import (
-            vector_search_tool,
-            graph_search_tool,
-            hybrid_search_tool,
-            comprehensive_search_tool,
-            VectorSearchInput,
-            GraphSearchInput,
-            HybridSearchInput,
-            ComprehensiveSearchInput,
-        )
-    except ImportError:
-        # Create mock system prompt and tools if agent components aren't available
-        SYSTEM_PROMPT = """You are a helpful AI assistant with access to a knowledge base.
-        You can search documents, explore knowledge graphs, and provide comprehensive answers.
-        All data is automatically isolated to the current tenant's context."""
-
-        def get_llm_model():
-            return "gemini-2.0-flash-thinking-exp-1219"
+    def get_llm_model():
+        return "gemini-2.0-flash-thinking-exp-1219"
 
 
 from tenant_manager import TenantManager
@@ -143,21 +122,12 @@ class MultiTenantRAGAgent:
         self.graphiti_client = graphiti_client
         self.model_name = model_name
 
-        # Use the validated system prompt from single-tenant system
+        # Use the comprehensive system prompt for intelligent tool routing
         if system_prompt is None:
-            if PYDANTIC_AI_AVAILABLE:
-                try:
-                    from agent.prompts import SYSTEM_PROMPT
-
-                    system_prompt = SYSTEM_PROMPT
-                except ImportError:
-                    system_prompt = """You are a helpful AI assistant with access to a knowledge base.
-                    You can search documents, explore knowledge graphs, and provide comprehensive answers.
-                    All data is automatically isolated to the current tenant's context."""
-            else:
-                system_prompt = """You are a helpful AI assistant with access to a knowledge base.
-                You can search documents, explore knowledge graphs, and provide comprehensive answers.
-                All data is automatically isolated to the current tenant's context."""
+            system_prompt = SYSTEM_PROMPT
+            logger.info(
+                "Using comprehensive system prompt for intelligent tool routing"
+            )
 
         # Initialize Pydantic AI agent with tenant-aware tools
         if PYDANTIC_AI_AVAILABLE:
@@ -502,10 +472,15 @@ class MultiTenantRAGAgent:
     ) -> Dict[str, Any]:
         """
         Process a chat message with tenant-aware context.
-
-        This is the main method that matches the single-tenant system's functionality.
+        Returns clean response with tool usage and source information.
         """
         try:
+            # Log start of chat processing
+            logger.info(f"🧠 Starting chat processing for tenant {context.tenant_id}")
+            logger.info(
+                f"📝 User query: {message[:100]}{'...' if len(message) > 100 else ''}"
+            )
+
             # Create dependencies for the agent
             deps = TenantAgentDependencies(
                 tenant_id=context.tenant_id,
@@ -514,22 +489,109 @@ class MultiTenantRAGAgent:
                 tenant_manager=self.tenant_manager,
             )
 
-            # Execute query with agent - SAME PATTERN AS SINGLE-TENANT SYSTEM
-            result = await self.agent.run(message, deps=deps)
+            # Track tools used for response
+            tools_used = []
+            sources_found = []
 
-            # Extract response content
-            response_text = result.data if hasattr(result, "data") else str(result)
+            # Execute query with agent
+            logger.info(f"🤖 Running agent with model {self.model_name}")
+            result = await self.agent.run(message, deps=deps)
+            logger.info(f"✅ Agent completed processing for tenant {context.tenant_id}")
+
+            # Extract response content - handle Pydantic AI result properly
+            if hasattr(result, "data"):
+                response_text = str(result.data)
+            else:
+                response_text = str(result)
+
+            # Extract tool usage information if available
+            if hasattr(result, "all_messages"):
+                logger.debug("🔍 Extracting tool usage from agent messages")
+                for msg in result.all_messages():
+                    if hasattr(msg, "tool_calls") and msg.tool_calls:
+                        logger.debug(
+                            f"Found {len(msg.tool_calls)} tool calls in message"
+                        )
+                        for tool_call in msg.tool_calls:
+                            if hasattr(tool_call, "function"):
+                                tool_name = tool_call.function.name
+                            else:
+                                tool_name = getattr(tool_call, "name", "Unknown")
+
+                            logger.debug(f"Processing tool call: {tool_name}")
+
+                            # Map tool names to user-friendly descriptions
+                            if "tenant_vector_search" in tool_name:
+                                tools_used.append("Vector Search")
+                                logger.info("🔧 Used Vector Search tool")
+                            elif "tenant_graph_search" in tool_name:
+                                tools_used.append("Knowledge Graph Search")
+                                logger.info("🔧 Used Knowledge Graph Search tool")
+                            elif "tenant_hybrid_search" in tool_name:
+                                tools_used.append("Hybrid Search")
+                                logger.info("🔧 Used Hybrid Search tool")
+                            elif "tenant_comprehensive_search" in tool_name:
+                                tools_used.append("Comprehensive Search")
+                                logger.info("🔧 Used Comprehensive Search tool")
+                            elif "tenant_local_dual_search" in tool_name:
+                                tools_used.append("Dual Storage Search")
+                                logger.info("🔧 Used Dual Storage Search tool")
+                            elif "vector" in tool_name.lower():
+                                tools_used.append("Vector Search")
+                                logger.info("🔧 Used Vector Search tool")
+                            elif "graph" in tool_name.lower():
+                                tools_used.append("Knowledge Graph Search")
+                                logger.info("🔧 Used Knowledge Graph Search tool")
+                            elif "hybrid" in tool_name.lower():
+                                tools_used.append("Hybrid Search")
+                                logger.info("🔧 Used Hybrid Search tool")
+                            elif "dual" in tool_name.lower():
+                                tools_used.append("Dual Storage Search")
+                                logger.info("🔧 Used Dual Storage Search tool")
+                            else:
+                                tools_used.append(f"Tool: {tool_name}")
+                                logger.info(f"🔧 Used tool: {tool_name}")
+
+                    # Also check for tool results to extract sources
+                    if hasattr(msg, "tool_result") and msg.tool_result:
+                        # Extract source information from tool results
+                        tool_result = msg.tool_result
+                        if isinstance(tool_result, list):
+                            for item in tool_result[:3]:  # Top 3 sources
+                                if isinstance(item, dict):
+                                    source_info = {
+                                        "source": item.get(
+                                            "source",
+                                            item.get("document_title", "Unknown"),
+                                        ),
+                                        "score": item.get("score", 0),
+                                        "type": item.get("type", "unknown"),
+                                    }
+                                    sources_found.append(source_info)
+
+                logger.info(
+                    f"📊 Extracted {len(tools_used)} tools and {len(sources_found)} sources"
+                )
+            else:
+                logger.debug("No tool usage information available in agent result")
+
+            # Remove duplicates and ensure we have something
+            tools_used = (
+                list(set(tools_used)) if tools_used else ["Dual Storage Search"]
+            )
 
             return {
                 "response": response_text,
                 "tenant_id": context.tenant_id,
                 "timestamp": datetime.now().isoformat(),
-                "sources": [],  # TODO: Extract sources from tool calls
+                "tools_used": tools_used,
+                "sources": sources_found,
                 "metadata": {
                     "model": self.model_name,
                     "session_id": context.session_id,
-                    "user_id": context.user_id,
+                    "execution_mode": "tenant_isolated",
                 },
+                "agent_result": result,  # Include full result for CLI processing
             }
 
         except Exception as e:
@@ -538,6 +600,7 @@ class MultiTenantRAGAgent:
                 "response": f"I'm sorry, I encountered an error while processing your request: {str(e)}",
                 "tenant_id": context.tenant_id,
                 "timestamp": datetime.now().isoformat(),
+                "tools_used": [],
                 "sources": [],
                 "metadata": {
                     "error": str(e),
