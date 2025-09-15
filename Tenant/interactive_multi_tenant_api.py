@@ -10,12 +10,23 @@ import uuid
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta
 from contextlib import asynccontextmanager
+from uuid import UUID
+
+# Load environment variables from .env file
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv()  # Load .env file from current directory
+    print("✅ Environment variables loaded from .env file")
+except ImportError:
+    print("⚠️  python-dotenv not installed. Install with: pip install python-dotenv")
+    print("Environment variables will be read from system environment only")
 
 # Add parent directory to path for agent imports
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 try:
-    from fastapi import FastAPI, HTTPException, Depends, status
+    from fastapi import FastAPI, HTTPException, Depends, status, UploadFile, File
     from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
     from fastapi.middleware.cors import CORSMiddleware
     from pydantic import BaseModel, Field
@@ -33,37 +44,33 @@ from multi_tenant_agent import MultiTenantRAGAgent
 
 # Import validated agent from parent directory
 try:
-    from agent.tools import (
-        vector_search_tool,
-        graph_search_tool,
-        hybrid_search_tool,
-        comprehensive_search_tool,
-        VectorSearchInput,
-        GraphSearchInput,
-        HybridSearchInput,
-        ComprehensiveSearchInput,
-    )
+    pass  # Removed unused tool imports since we're using the agent directly
 except ImportError as e:
     print(f"Error importing agent modules: {e}")
     print("Please ensure the agent folder is properly configured")
     sys.exit(1)
 
 # Configure comprehensive logging like the reference comprehensive agent
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    handlers=[
-        logging.StreamHandler(),  # Console output for API terminal visibility
-        logging.FileHandler("interactive_multi_tenant_api.log"),  # Single log file
-    ],
-)
+# Create single console and file handlers to avoid duplication
+console_handler = logging.StreamHandler()
+file_handler = logging.FileHandler("interactive_multi_tenant_api.log")
+formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+console_handler.setFormatter(formatter)
+file_handler.setFormatter(formatter)
+
+# Configure root logger with single handlers
+root_logger = logging.getLogger()
+root_logger.setLevel(logging.INFO)
+root_logger.handlers.clear()  # Clear any existing handlers
+root_logger.addHandler(console_handler)
+root_logger.addHandler(file_handler)
+
 logger = logging.getLogger(__name__)
 
-# Configure all backend loggers to show in API terminal and log file
-# This captures activity from both API operations and CLI operations
+# Configure all backend loggers to inherit from root (avoiding handler duplication)
 backend_loggers = [
     "multi_tenant_agent",
-    "tenant_graphiti_client", 
+    "tenant_graphiti_client",
     "tenant_data_ingestion_service",
     "tenant_manager",
     "auth_middleware",
@@ -71,32 +78,14 @@ backend_loggers = [
     "google_genai",
     "httpx",
     "neo4j",
-    "ingestion"
+    "ingestion",
 ]
 
 for logger_name in backend_loggers:
     backend_logger = logging.getLogger(logger_name)
     backend_logger.setLevel(logging.INFO)
-    
-    # Ensure logs appear in API terminal (don't add duplicate handlers)
-    if not any(isinstance(h, logging.StreamHandler) for h in backend_logger.handlers):
-        console_handler = logging.StreamHandler()
-        console_handler.setLevel(logging.INFO)
-        console_formatter = logging.Formatter(
-            "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-        )
-        console_handler.setFormatter(console_formatter)
-        backend_logger.addHandler(console_handler)
-    
-    # Ensure logs go to the single API log file
-    if not any(isinstance(h, logging.FileHandler) for h in backend_logger.handlers):
-        file_handler = logging.FileHandler("interactive_multi_tenant_api.log")
-        file_handler.setLevel(logging.INFO)
-        file_formatter = logging.Formatter(
-            "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-        )
-        file_handler.setFormatter(file_formatter)
-        backend_logger.addHandler(file_handler)
+    # Don't add handlers - let them inherit from root logger
+    backend_logger.propagate = True
 
 # Security scheme
 security = HTTPBearer()
@@ -126,18 +115,48 @@ async def lifespan(app: FastAPI):
             )
 
         # Initialize with environment variables or fallback values for testing
+        neo4j_uri = (
+            os.getenv("NEO4J_URI") or os.getenv("NEO4J_URL") or "neo4j://127.0.0.1:7687"
+        )
+        neo4j_user = (
+            os.getenv("NEO4J_USERNAME")
+            or os.getenv("NEO4J_USER")
+            or os.getenv("NEO4J_AUTH", "").split("/")[0]
+            if os.getenv("NEO4J_AUTH")
+            else "neo4j"
+        )
+        neo4j_password = os.getenv("NEO4J_PASSWORD") or (
+            os.getenv("NEO4J_AUTH", "").split("/")[1]
+            if "/" in os.getenv("NEO4J_AUTH", "")
+            else None
+        )
+
+        # Debug Neo4j configuration
+        logger.info(f"Neo4j URI: {neo4j_uri}")
+        logger.info(f"Neo4j User: {neo4j_user}")
+        logger.info(f"Neo4j Password: {'***' if neo4j_password else 'None'}")
+
+        # Warn if credentials are missing
+        if not neo4j_password:
+            logger.warning(
+                "⚠️  Neo4j password not found! Set NEO4J_PASSWORD environment variable for graph search."
+            )
+            logger.warning("   Example: export NEO4J_PASSWORD=your_neo4j_password")
+            neo4j_uri = None  # Disable Neo4j if no password
+
         tenant_manager = TenantManager(
             neon_api_key=neon_api_key or "test_neon_api_key",
             catalog_db_url=catalog_db_url or "postgresql://localhost:5432/test_catalog",
             default_region="aws-us-east-1",
-            neo4j_uri=os.getenv("NEO4J_URI"),
-            neo4j_user=os.getenv("NEO4J_USERNAME"),
-            neo4j_password=os.getenv("NEO4J_PASSWORD"),
+            neo4j_uri=neo4j_uri,
+            neo4j_user=neo4j_user,
+            neo4j_password=neo4j_password,
         )
         logger.info("Tenant manager initialized")
 
         # Initialize ingestion service for tenant-aware searches
         from tenant_data_ingestion_service import TenantDataIngestionService
+
         tenant_manager.ingestion_service = TenantDataIngestionService(
             tenant_manager=tenant_manager
         )
@@ -147,8 +166,12 @@ async def lifespan(app: FastAPI):
         jwt_authenticator = JWTAuthenticator()
         logger.info("JWT authenticator initialized")
 
-        logger.info("🎯 Multi-Tenant RAG API ready - all backend logs will appear in this terminal")
-        logger.info("📊 Backend activity from CLI and API operations will be shown below:")
+        logger.info(
+            "🎯 Multi-Tenant RAG API ready - all backend logs will appear in this terminal"
+        )
+        logger.info(
+            "📊 Backend activity from CLI and API operations will be shown below:"
+        )
 
         yield
 
@@ -227,6 +250,42 @@ class SearchResponse(BaseModel):
     execution_time: float
 
 
+class TenantCreateRequest(BaseModel):
+    """Tenant creation request model."""
+
+    name: str = Field(..., description="Human-readable tenant name")
+    email: str = Field(..., description="Tenant email address")
+    region: str = Field(default="aws-us-east-1", description="Neon region")
+    plan: str = Field(default="basic", description="Tenant plan")
+
+
+class TenantResponse(BaseModel):
+    """Tenant response model."""
+
+    tenant_id: str
+    tenant_name: str
+    tenant_email: str
+    status: str
+    created_at: datetime
+    neon_project_id: Optional[str] = None
+    region: str
+    plan: str
+
+
+class DocumentUploadResponse(BaseModel):
+    """Document upload response model."""
+
+    document_id: str
+    filename: str
+    tenant_id: str
+    status: str
+    uploaded_at: datetime
+    chunks_created: int
+    processing_time_ms: float
+    vector_stored: bool
+    graph_stored: bool
+
+
 class ChatRequest(BaseModel):
     """Chat request model."""
 
@@ -242,6 +301,7 @@ class ChatResponse(BaseModel):
     session_id: str
     tenant_id: str
     sources: List[Dict[str, Any]] = Field(default_factory=list)
+    tools_used: List[str] = Field(default_factory=list)
     execution_time: float
 
 
@@ -330,6 +390,41 @@ async def health_check():
         )
 
 
+@app.post("/tenants", response_model=TenantResponse)
+async def create_tenant(tenant_request: TenantCreateRequest):
+    """Create a new tenant (public endpoint - no authentication required)."""
+    try:
+        from tenant_manager import TenantCreateRequest as TMTenantCreateRequest
+
+        # Create tenant via TenantManager
+        tm_request = TMTenantCreateRequest(
+            name=tenant_request.name,
+            email=tenant_request.email,
+            region=tenant_request.region,
+            plan=tenant_request.plan,
+        )
+
+        tenant_info = await tenant_manager.create_tenant(tm_request)
+
+        return TenantResponse(
+            tenant_id=str(tenant_info.tenant_id),
+            tenant_name=tenant_info.tenant_name,
+            tenant_email=tenant_info.tenant_email,
+            status=tenant_info.status.value,
+            created_at=tenant_info.created_at,
+            neon_project_id=str(tenant_info.neon_project_id),
+            region=tenant_info.region,
+            plan=tenant_info.plan,
+        )
+
+    except Exception as e:
+        logger.error(f"Failed to create tenant: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to create tenant: {str(e)}",
+        )
+
+
 @app.post("/auth/login", response_model=AuthResponse)
 async def login(auth_request: AuthRequest):
     """Authenticate and get access token."""
@@ -382,11 +477,31 @@ async def get_tenant_info(tenant_context: TenantContext = Depends(get_current_te
     try:
         tenant_data = await tenant_manager.get_tenant(tenant_context.tenant_id)
 
+        if not tenant_data:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Tenant {tenant_context.tenant_id} not found",
+            )
+
+        # Convert from dataclass TenantInfo to Pydantic TenantInfo
         return TenantInfo(
-            tenant_id=tenant_data["tenant_id"],
-            status=tenant_data.get("status", "active"),
-            created_at=tenant_data.get("created_at", datetime.utcnow()),
-            metadata=tenant_data.get("metadata", {}),
+            tenant_id=str(tenant_data.tenant_id),  # Convert UUID to string
+            status=tenant_data.status.value
+            if hasattr(tenant_data.status, "value")
+            else str(tenant_data.status),
+            created_at=tenant_data.created_at,
+            metadata={
+                "tenant_name": tenant_data.tenant_name,
+                "tenant_email": tenant_data.tenant_email,
+                "neon_project_id": tenant_data.neon_project_id,
+                "region": tenant_data.region,
+                "plan": tenant_data.plan,
+                "max_documents": tenant_data.max_documents,
+                "max_storage_mb": tenant_data.max_storage_mb,
+                "updated_at": tenant_data.updated_at.isoformat()
+                if tenant_data.updated_at
+                else None,
+            },
         )
 
     except Exception as e:
@@ -406,82 +521,180 @@ async def search(
     start_time = datetime.utcnow()
 
     try:
+        # Use the multi-tenant agent for search operations to ensure proper tenant context
+        agent = MultiTenantRAGAgent(
+            tenant_manager=tenant_manager,
+            graphiti_client=tenant_manager.graphiti_client,
+        )
+
+        # Convert string tenant_id to UUID for agent context
+        from uuid import UUID
+
+        tenant_uuid = (
+            UUID(tenant_context.tenant_id)
+            if isinstance(tenant_context.tenant_id, str)
+            else tenant_context.tenant_id
+        )
+
+        # Import the dependencies class
+        from multi_tenant_agent import TenantAgentDependencies
+        
+        # Create agent context with dependencies
+        agent_deps = TenantAgentDependencies(
+            tenant_id=str(tenant_uuid),
+            session_id="search_session",
+            user_id="api_user",
+            tenant_manager=tenant_manager
+        )
+        
         results = []
 
         if search_request.search_type == "vector":
-            # Vector search
-            input_data = VectorSearchInput(
-                query=search_request.query, limit=search_request.limit
-            )
-            vector_results = await vector_search_tool(input_data)
-
-            results = [
-                SearchResult(
-                    content=r.content,
-                    score=r.score,
-                    source=r.document_source,
-                    metadata={
-                        "document_title": r.document_title,
-                        "chunk_id": r.chunk_id,
-                    },
-                )
-                for r in vector_results
-            ]
+            # Use direct vector search service call
+            try:
+                if hasattr(tenant_manager, "ingestion_service"):
+                    tenant_db_url = await tenant_manager.get_tenant_database_url(tenant_uuid)
+                    vector_results = await tenant_manager.ingestion_service.vector_search_for_tenant(
+                        tenant_database_url=tenant_db_url,
+                        query=search_request.query,
+                        limit=search_request.limit
+                    )
+                    results = [
+                        SearchResult(
+                            content=r.get("content", ""),
+                            score=r.get("score", 0.0),
+                            source=r.get("source", "vector_search"),
+                            metadata=r.get("metadata", {}),
+                        )
+                        for r in vector_results
+                    ]
+            except Exception as e:
+                logger.error(f"Vector search failed: {e}")
+                results = []
 
         elif search_request.search_type == "graph":
-            # Graph search
-            input_data = GraphSearchInput(query=search_request.query)
-            graph_results = await graph_search_tool(input_data)
-
-            results = [
-                SearchResult(
-                    content=r.fact,
-                    source="knowledge_graph",
-                    metadata={
-                        "uuid": r.uuid,
-                        "valid_at": r.valid_at,
-                        "invalid_at": r.invalid_at,
-                        "source_node_uuid": r.source_node_uuid,
-                    },
-                )
-                for r in graph_results
-            ]
+            # Use direct graph search service call
+            try:
+                if tenant_manager.graphiti_client:
+                    graph_results = await tenant_manager.graphiti_client.search(
+                        tenant_id=str(tenant_uuid),
+                        query=search_request.query,
+                        limit=search_request.limit
+                    )
+                    results = [
+                        SearchResult(
+                            content=r.get("content", ""),
+                            score=r.get("score", 0.0),
+                            source=r.get("source", "graph_search"),
+                            metadata=r.get("metadata", {}),
+                        )
+                        for r in graph_results
+                    ]
+                else:
+                    logger.warning("Graph search not available - no Graphiti client")
+                    results = []
+            except Exception as e:
+                logger.error(f"Graph search failed: {e}")
+                results = []
 
         elif search_request.search_type == "hybrid":
-            # Hybrid search
-            input_data = HybridSearchInput(
-                query=search_request.query,
-                limit=search_request.limit,
-                text_weight=search_request.text_weight,
-            )
-            hybrid_results = await hybrid_search_tool(input_data)
-
-            results = [
-                SearchResult(
-                    content=r.content,
-                    score=r.score,
-                    source=r.source,
-                    metadata=r.metadata,
-                )
-                for r in hybrid_results
-            ]
+            # Use direct hybrid search (vector + keyword/BM25)
+            try:
+                if hasattr(tenant_manager, "ingestion_service"):
+                    tenant_db_url = await tenant_manager.get_tenant_database_url(tenant_uuid)
+                    hybrid_results = await tenant_manager.ingestion_service.hybrid_search_for_tenant(
+                        tenant_database_url=tenant_db_url,
+                        query=search_request.query,
+                        limit=search_request.limit,
+                        text_weight=search_request.text_weight
+                    )
+                    results = [
+                        SearchResult(
+                            content=r.get("content", ""),
+                            score=r.get("score", 0.0),
+                            source=r.get("source", "hybrid_search"),
+                            metadata=r.get("metadata", {}),
+                        )
+                        for r in hybrid_results
+                    ]
+                else:
+                    logger.warning("Hybrid search not available - no ingestion service")
+                    results = []
+            except Exception as e:
+                logger.error(f"Hybrid search failed: {e}")
+                results = []
+            except Exception as e:
+                logger.error(f"Hybrid search failed: {e}")
+                results = []
 
         elif search_request.search_type == "comprehensive":
-            # Comprehensive search using all methods
-            input_data = ComprehensiveSearchInput(
-                query=search_request.query, limit=search_request.limit
-            )
-            comp_results = await comprehensive_search_tool(input_data)
-
-            results = [
-                SearchResult(
-                    content=r.content,
-                    score=r.score,
-                    source=r.source,
-                    metadata=r.metadata,
-                )
-                for r in comp_results
-            ]
+            # Use comprehensive search (vector + graph + hybrid combined)
+            try:
+                all_results = []
+                tenant_db_url = await tenant_manager.get_tenant_database_url(tenant_uuid)
+                
+                # Vector search
+                if hasattr(tenant_manager, "ingestion_service"):
+                    try:
+                        vector_results = await tenant_manager.ingestion_service.vector_search_for_tenant(
+                            tenant_database_url=tenant_db_url,
+                            query=search_request.query,
+                            limit=search_request.limit // 3  # Split limit across methods
+                        )
+                        for r in vector_results:
+                            all_results.append(SearchResult(
+                                content=r.get("content", ""),
+                                score=r.get("score", 0.0),
+                                source="vector_search",
+                                metadata=r.get("metadata", {}),
+                            ))
+                    except Exception as e:
+                        logger.warning(f"Vector search failed in comprehensive: {e}")
+                
+                # Graph search
+                if tenant_manager.graphiti_client:
+                    try:
+                        graph_results = await tenant_manager.graphiti_client.search(
+                            tenant_id=str(tenant_uuid),
+                            query=search_request.query,
+                            limit=search_request.limit // 3
+                        )
+                        for r in graph_results:
+                            all_results.append(SearchResult(
+                                content=r.get("fact", r.get("content", "")),
+                                score=r.get("score", 0.0),
+                                source="graph_search",
+                                metadata=r.get("metadata", {}),
+                            ))
+                    except Exception as e:
+                        logger.warning(f"Graph search failed in comprehensive: {e}")
+                
+                # Hybrid search
+                if hasattr(tenant_manager, "ingestion_service"):
+                    try:
+                        hybrid_results = await tenant_manager.ingestion_service.hybrid_search_for_tenant(
+                            tenant_database_url=tenant_db_url,
+                            query=search_request.query,
+                            limit=search_request.limit // 3,
+                            text_weight=search_request.text_weight
+                        )
+                        for r in hybrid_results:
+                            all_results.append(SearchResult(
+                                content=r.get("content", ""),
+                                score=r.get("score", 0.0),
+                                source="hybrid_search",
+                                metadata=r.get("metadata", {}),
+                            ))
+                    except Exception as e:
+                        logger.warning(f"Hybrid search failed in comprehensive: {e}")
+                
+                # Sort all results by score and limit
+                all_results.sort(key=lambda x: x.score, reverse=True)
+                results = all_results[:search_request.limit]
+                    
+            except Exception as e:
+                logger.error(f"Comprehensive search failed: {e}")
+                results = []
 
         else:
             raise HTTPException(
@@ -519,12 +732,23 @@ async def chat(
     start_time = datetime.utcnow()
 
     try:
-        # Initialize multi-tenant agent
-        agent = MultiTenantRAGAgent(tenant_context.tenant_id)
+        # Initialize multi-tenant agent with tenant manager and graphiti client
+        agent = MultiTenantRAGAgent(
+            tenant_manager=tenant_manager,
+            graphiti_client=tenant_manager.graphiti_client,
+        )
 
-        # Create tenant context for agent
+        # Create tenant context for agent (convert string tenant_id to UUID)
+        from uuid import UUID
+
+        tenant_uuid = (
+            UUID(tenant_context.tenant_id)
+            if isinstance(tenant_context.tenant_id, str)
+            else tenant_context.tenant_id
+        )
+
         agent_context = TenantContext(
-            tenant_id=tenant_context.tenant_id,
+            tenant_id=tenant_uuid,  # Pass UUID, not string
             user_id=tenant_context.user_id,
             session_id=chat_request.session_id or str(uuid.uuid4()),
             metadata=chat_request.search_preferences or {},
@@ -538,8 +762,11 @@ async def chat(
         return ChatResponse(
             response=response.get("response", ""),
             session_id=agent_context.session_id,
-            tenant_id=tenant_context.tenant_id,
+            tenant_id=str(
+                tenant_context.tenant_id
+            ),  # Convert back to string for response
             sources=response.get("sources", []),
+            tools_used=response.get("tools_used", []),
             execution_time=execution_time,
         )
 
@@ -548,6 +775,69 @@ async def chat(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Chat service error",
+        )
+
+
+@app.post("/documents", response_model=DocumentUploadResponse)
+async def upload_document(
+    file: UploadFile = File(...),
+    tenant_context: TenantContext = Depends(get_current_tenant),
+):
+    """Upload a document for the authenticated tenant."""
+    try:
+        # Read file content
+        content = await file.read()
+        content_str = content.decode("utf-8", errors="ignore")
+
+        # Create document upload request
+        from tenant_ingestion_models import DocumentInput as ServiceDocumentRequest
+
+        upload_request = ServiceDocumentRequest(
+            title=file.filename or "Untitled Document",
+            content=content_str,
+            source="api_upload",
+            metadata={
+                "original_filename": file.filename,
+                "content_type": file.content_type,
+                "uploaded_at": datetime.utcnow().isoformat(),
+            },
+        )
+
+        # Upload document using tenant ingestion service
+        start_time = datetime.utcnow()
+
+        # Convert tenant_id to string if needed
+        tenant_id_str = (
+            tenant_context.tenant_id
+            if isinstance(tenant_context.tenant_id, str)
+            else str(tenant_context.tenant_id)
+        )
+
+        # Ingest document into both Neon database and Neo4j (Graphiti)
+        ingestion_result = await tenant_manager.ingestion_service.ingest_document_for_tenant(
+            tenant_id=tenant_id_str,
+            document=upload_request,
+        )
+
+        processing_time = (datetime.utcnow() - start_time).total_seconds() * 1000
+
+        return DocumentUploadResponse(
+            document_id=ingestion_result.document_id,
+            filename=file.filename or "Untitled Document",
+            tenant_id=tenant_id_str,
+            status="uploaded",
+            uploaded_at=datetime.utcnow(),
+            chunks_created=ingestion_result.chunks_created,
+            processing_time_ms=processing_time,
+            vector_stored=ingestion_result.vector_stored,
+            graph_stored=ingestion_result.graph_episode_created,
+        )
+
+    except Exception as e:
+        logger.error(f"Document upload failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Document upload failed: {str(e)}",
         )
 
 
@@ -560,10 +850,12 @@ async def root():
         "description": "Authenticated FastAPI for multi-tenant hybrid RAG with knowledge graphs",
         "endpoints": {
             "health": "/health",
+            "create_tenant": "POST /tenants",
             "auth": "/auth/login",
             "tenant_info": "/tenants/info",
             "search": "/search",
             "chat": "/chat",
+            "upload_document": "POST /documents",
         },
         "docs": "/docs",
         "redoc": "/redoc",

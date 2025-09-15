@@ -13,7 +13,7 @@ This module implements:
 
 import logging
 import uuid
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Union
 from uuid import UUID
 from dataclasses import dataclass
 from datetime import datetime
@@ -303,6 +303,33 @@ class TenantManager:
         except Exception as e:
             logger.error(f"Failed to get tenant {tenant_id}: {str(e)}")
             return None
+
+    async def tenant_exists(self, tenant_id: Union[str, UUID]) -> bool:
+        """
+        Check if a tenant exists by ID.
+
+        Args:
+            tenant_id: UUID or string representation of the tenant ID
+
+        Returns:
+            True if tenant exists, False otherwise
+        """
+        try:
+            # Convert string to UUID if necessary
+            if isinstance(tenant_id, str):
+                tenant_uuid = UUID(tenant_id)
+            else:
+                tenant_uuid = tenant_id
+
+            # Use existing get_tenant method to check existence
+            tenant_info = await self.get_tenant(tenant_uuid)
+            return tenant_info is not None
+        except (ValueError, TypeError) as e:
+            logger.error(f"Invalid tenant_id format: {tenant_id}, error: {e}")
+            return False
+        except Exception as e:
+            logger.error(f"Error checking tenant existence for {tenant_id}: {e}")
+            return False
 
     async def get_tenant_database_url(self, tenant_id: UUID) -> str:
         """

@@ -7,6 +7,7 @@ Uses the same validated Pydantic AI agent structure as the single-tenant system.
 import os
 import sys
 import logging
+import asyncio
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 from dataclasses import dataclass
@@ -121,6 +122,10 @@ class MultiTenantRAGAgent:
         self.tenant_manager = tenant_manager
         self.graphiti_client = graphiti_client
         self.model_name = model_name
+        
+        # Track tool usage for current session
+        self.current_tools_used = []
+        self.current_sources_found = []
 
         # Use the comprehensive system prompt for intelligent tool routing
         if system_prompt is None:
@@ -421,6 +426,9 @@ class MultiTenantRAGAgent:
                 tenant_id = ctx.deps.tenant_id
                 logger.info(f"🔍 Local dual search for tenant {tenant_id}: {query}")
 
+                # Track tool usage
+                self.current_tools_used.extend(["Vector Search", "Knowledge Graph Search", "Dual Storage Search"])
+
                 # Perform tenant-aware vector search
                 vector_results = await tenant_vector_search(ctx, query, limit)
 
@@ -430,29 +438,45 @@ class MultiTenantRAGAgent:
                 # Combine results
                 combined = []
 
-                # Add vector results
+                # Add vector results and track sources
                 for r in vector_results:
-                    combined.append(
-                        {
-                            "content": r["content"],
-                            "score": r["score"],
-                            "source": r["document_title"],
-                            "type": "vector",
-                            "chunk_id": r.get("chunk_id"),
-                        }
-                    )
+                    combined_result = {
+                        "content": r["content"],
+                        "score": r["score"],
+                        "source": r["document_title"],
+                        "type": "vector",
+                        "chunk_id": r.get("chunk_id"),
+                    }
+                    combined.append(combined_result)
+                    
+                    # Track sources
+                    source_info = {
+                        "source": r["document_title"],
+                        "score": r["score"],
+                        "type": "vector",
+                        "content_preview": r["content"][:100] + "..." if r["content"] else "",
+                    }
+                    self.current_sources_found.append(source_info)
 
-                # Add graph results (balance the results)
+                # Add graph results (balance the results) and track sources
                 for r in graph_results[: limit // 2]:
-                    combined.append(
-                        {
-                            "content": r["fact"],
-                            "score": 1.0,  # Graph facts get default high score
-                            "source": r.get("source_node_uuid", "knowledge_graph"),
-                            "type": "graph",
-                            "valid_at": r.get("valid_at"),
-                        }
-                    )
+                    combined_result = {
+                        "content": r["fact"],
+                        "score": 1.0,  # Graph facts get default high score
+                        "source": r.get("source_node_uuid", "knowledge_graph"),
+                        "type": "graph",
+                        "valid_at": r.get("valid_at"),
+                    }
+                    combined.append(combined_result)
+                    
+                    # Track sources
+                    source_info = {
+                        "source": f"Knowledge Graph - {r.get('source_node_uuid', 'Unknown')}",
+                        "score": 1.0,
+                        "type": "graph",
+                        "content_preview": r["fact"][:100] + "..." if r["fact"] else "",
+                    }
+                    self.current_sources_found.append(source_info)
 
                 logger.info(
                     f"✅ Local dual search returned {len(combined)} combined results"
@@ -475,6 +499,10 @@ class MultiTenantRAGAgent:
         Returns clean response with tool usage and source information.
         """
         try:
+            # Reset tool tracking for this chat session
+            self.current_tools_used = []
+            self.current_sources_found = []
+            
             # Log start of chat processing
             logger.info(f"🧠 Starting chat processing for tenant {context.tenant_id}")
             logger.info(
@@ -498,6 +526,14 @@ class MultiTenantRAGAgent:
             result = await self.agent.run(message, deps=deps)
             logger.info(f"✅ Agent completed processing for tenant {context.tenant_id}")
 
+            # Debug: Log the structure of the result object
+            logger.debug(f"Result type: {type(result)}")
+            logger.debug(f"Result attributes: {dir(result)}")
+            if hasattr(result, "all_messages"):
+                logger.debug(f"Number of messages: {len(result.all_messages())}")
+            else:
+                logger.debug("Result has no all_messages attribute")
+
             # Extract response content - handle Pydantic AI result properly
             if hasattr(result, "data"):
                 response_text = str(result.data)
@@ -506,22 +542,30 @@ class MultiTenantRAGAgent:
 
             # Extract tool usage information if available
             if hasattr(result, "all_messages"):
-                logger.debug("🔍 Extracting tool usage from agent messages")
-                for msg in result.all_messages():
+                logger.info("🔍 Extracting tool usage from agent messages")
+                messages = result.all_messages()
+                logger.info(f"Found {len(messages)} messages to analyze")
+                
+                for i, msg in enumerate(messages):
+                    logger.info(f"Message {i}: {type(msg)}, attributes: {[attr for attr in dir(msg) if not attr.startswith('_')]}")
+                    
                     if hasattr(msg, "tool_calls") and msg.tool_calls:
-                        logger.debug(
-                            f"Found {len(msg.tool_calls)} tool calls in message"
+                        logger.info(
+                            f"Found {len(msg.tool_calls)} tool calls in message {i}"
                         )
-                        for tool_call in msg.tool_calls:
+                        for j, tool_call in enumerate(msg.tool_calls):
                             if hasattr(tool_call, "function"):
                                 tool_name = tool_call.function.name
                             else:
                                 tool_name = getattr(tool_call, "name", "Unknown")
 
-                            logger.debug(f"Processing tool call: {tool_name}")
+                            logger.info(f"Tool call {j}: {tool_name}")
 
                             # Map tool names to user-friendly descriptions
-                            if "tenant_vector_search" in tool_name:
+                            if "local_dual_search" in tool_name:
+                                tools_used.extend(["Vector Search", "Knowledge Graph Search", "Dual Storage Search"])
+                                logger.info("🔧 Used Local Dual Search tool (Vector + Graph)")
+                            elif "tenant_vector_search" in tool_name:
                                 tools_used.append("Vector Search")
                                 logger.info("🔧 Used Vector Search tool")
                             elif "tenant_graph_search" in tool_name:
@@ -533,9 +577,6 @@ class MultiTenantRAGAgent:
                             elif "tenant_comprehensive_search" in tool_name:
                                 tools_used.append("Comprehensive Search")
                                 logger.info("🔧 Used Comprehensive Search tool")
-                            elif "tenant_local_dual_search" in tool_name:
-                                tools_used.append("Dual Storage Search")
-                                logger.info("🔧 Used Dual Storage Search tool")
                             elif "vector" in tool_name.lower():
                                 tools_used.append("Vector Search")
                                 logger.info("🔧 Used Vector Search tool")
@@ -554,10 +595,12 @@ class MultiTenantRAGAgent:
 
                     # Also check for tool results to extract sources
                     if hasattr(msg, "tool_result") and msg.tool_result:
+                        logger.info(f"Found tool result in message {i}: {type(msg.tool_result)}")
                         # Extract source information from tool results
                         tool_result = msg.tool_result
                         if isinstance(tool_result, list):
-                            for item in tool_result[:3]:  # Top 3 sources
+                            logger.info(f"Processing {len(tool_result)} tool result items")
+                            for item in tool_result[:5]:  # Top 5 sources
                                 if isinstance(item, dict):
                                     source_info = {
                                         "source": item.get(
@@ -566,26 +609,65 @@ class MultiTenantRAGAgent:
                                         ),
                                         "score": item.get("score", 0),
                                         "type": item.get("type", "unknown"),
+                                        "content_preview": item.get("content", "")[:100] + "..." if item.get("content") else "",
                                     }
                                     sources_found.append(source_info)
+                                    logger.info(f"Added source: {source_info['source']}")
+                        elif isinstance(tool_result, dict) and "results" in tool_result:
+                            # Handle wrapped results
+                            results = tool_result["results"]
+                            if isinstance(results, list):
+                                for item in results[:5]:
+                                    if isinstance(item, dict):
+                                        source_info = {
+                                            "source": item.get(
+                                                "source",
+                                                item.get("document_title", "Unknown"),
+                                            ),
+                                            "score": item.get("score", 0),
+                                            "type": item.get("type", "unknown"),
+                                            "content_preview": item.get("content", "")[:100] + "..." if item.get("content") else "",
+                                        }
+                                        sources_found.append(source_info)
+                                        logger.info(f"Added source from wrapped results: {source_info['source']}")
 
                 logger.info(
                     f"📊 Extracted {len(tools_used)} tools and {len(sources_found)} sources"
                 )
             else:
-                logger.debug("No tool usage information available in agent result")
+                logger.info("No tool usage information available in agent result")
+
+            # Use tracked tools and sources as fallback if extraction failed
+            if not tools_used and self.current_tools_used:
+                tools_used = self.current_tools_used
+                logger.info(f"📊 Using tracked tools: {tools_used}")
+                
+            if not sources_found and self.current_sources_found:
+                sources_found = self.current_sources_found[:5]  # Limit to top 5
+                logger.info(f"📊 Using tracked sources: {len(sources_found)} sources")
 
             # Remove duplicates and ensure we have something
             tools_used = (
-                list(set(tools_used)) if tools_used else ["Dual Storage Search"]
+                list(dict.fromkeys(tools_used)) if tools_used else ["Dual Storage Search"]
             )
+
+            # Remove duplicate sources
+            unique_sources = []
+            seen_sources = set()
+            for source in sources_found:
+                source_key = source.get("source", "Unknown")
+                if source_key not in seen_sources:
+                    unique_sources.append(source)
+                    seen_sources.add(source_key)
+
+            logger.info(f"📊 Final result: {len(tools_used)} tools, {len(unique_sources)} unique sources")
 
             return {
                 "response": response_text,
                 "tenant_id": context.tenant_id,
                 "timestamp": datetime.now().isoformat(),
                 "tools_used": tools_used,
-                "sources": sources_found,
+                "sources": unique_sources,
                 "metadata": {
                     "model": self.model_name,
                     "session_id": context.session_id,
